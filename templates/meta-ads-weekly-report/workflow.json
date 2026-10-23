@@ -1,0 +1,531 @@
+{
+  "name": "Send a weekly Meta Ads report with week-over-week KPIs and Gemini insights via Gmail",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Send a weekly Meta Ads report with week-over-week KPIs and Gemini insights via Gmail\n\nEvery Monday morning, pull last week's Meta (Facebook and Instagram) Ads results per campaign, compare them with the week before, flag wasted spend and fatigue with clear rules, and email a clean HTML report with a short Gemini-written summary of wins, problems and next steps. For business owners, freelance media buyers and small agencies who are tired of screenshotting Ads Manager.\n\n### How it works\n1. **Set report settings** holds the ad account, the conversion you track (purchase, lead, complete_registration or messaging), targets and recipient.\n2. **Get last week by campaign** and **Get the week before** call the Marketing API insights edge for the last two full 7-day periods.\n3. **Compare weeks and flag campaigns** calculates spend, conversions, CPA, ROAS, link CTR, CPM and frequency, week-over-week changes and rule flags (spend with no conversions, CPA 30% over target, low CTR, frequency above 3).\n4. **Write performance insights** turns only those numbers into a headline, wins, problems and actions.\n5. **Email the report** sends KPI tiles, notes and a campaign table via Gmail.\n\n### Setup\n1. Create a **Facebook Graph API** credential with a system-user or long-lived token that has `ads_read` (README.md walks through it).\n2. Add **Google Gemini (PaLM) API** and **Gmail** credentials.\n3. Fill in **Set report settings** (`act_` + your ad account number).\n\n### Customization\n- Change thresholds in the settings node; switch Gmail to a draft to review first.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1060,
+        "width": 600
+      },
+      "id": "8d59c068-bcb4-5f48-b7b8-45c723cd21b0",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "dc830ed3-d255-5e21-ab62-69aed07715da",
+      "name": "Every Monday at 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3645cb42-9d0a-5a82-a6c6-0a4a49f7360a",
+              "name": "ad_account_id",
+              "value": "act_YOUR_AD_ACCOUNT_ID",
+              "type": "string"
+            },
+            {
+              "id": "b54ef8e2-0f6f-59f2-8354-15924e794a44",
+              "name": "client_name",
+              "value": "YOUR_BUSINESS_NAME",
+              "type": "string"
+            },
+            {
+              "id": "4255740f-7807-5420-8c72-6e3825be3a79",
+              "name": "report_to",
+              "value": "YOUR_EMAIL@example.com",
+              "type": "string"
+            },
+            {
+              "id": "9f318b41-c20f-5547-b387-03f389d4ccd7",
+              "name": "currency",
+              "value": "£",
+              "type": "string"
+            },
+            {
+              "id": "59b95bcf-8b6a-5c4b-a2f1-12bf264a1fd6",
+              "name": "conversion_action",
+              "value": "purchase",
+              "type": "string"
+            },
+            {
+              "id": "bdc32260-ad74-51c5-9933-c4102a436479",
+              "name": "target_cpa",
+              "value": 25,
+              "type": "number"
+            },
+            {
+              "id": "9fb88a9e-04ae-5ff9-a148-548d50810399",
+              "name": "target_roas",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "ed814f8c-fc4d-512c-b186-d9bb75905cf5",
+              "name": "min_ctr",
+              "value": 0.8,
+              "type": "number"
+            },
+            {
+              "id": "67146bbc-fefc-5f24-9b65-fb6aaf72b954",
+              "name": "max_frequency",
+              "value": 3,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6dbacc44-6bdd-5d9b-a38b-df897204745d",
+      "name": "Set report settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "hostUrl": "graph.facebook.com",
+        "httpRequestMethod": "GET",
+        "graphApiVersion": "v23.0",
+        "node": "={{ $json.ad_account_id }}",
+        "edge": "insights",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "level",
+                "value": "campaign"
+              },
+              {
+                "name": "fields",
+                "value": "campaign_id,campaign_name,objective,spend,impressions,reach,frequency,clicks,inline_link_clicks,ctr,cpc,cpm,actions,action_values"
+              },
+              {
+                "name": "time_range",
+                "value": "={{ JSON.stringify({ since: $today.minus({ days: 7 }).toFormat('yyyy-MM-dd'), until: $today.minus({ days: 1 }).toFormat('yyyy-MM-dd') }) }}"
+              },
+              {
+                "name": "limit",
+                "value": "500"
+              }
+            ]
+          }
+        }
+      },
+      "id": "aa98345a-c7f4-5fd5-b88e-4d00284c594c",
+      "name": "Get last week by campaign",
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        380,
+        0
+      ],
+      "credentials": {
+        "facebookGraphApi": {
+          "name": "Facebook Graph account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "hostUrl": "graph.facebook.com",
+        "httpRequestMethod": "GET",
+        "graphApiVersion": "v23.0",
+        "node": "={{ $('Set report settings').first().json.ad_account_id }}",
+        "edge": "insights",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "level",
+                "value": "campaign"
+              },
+              {
+                "name": "fields",
+                "value": "campaign_id,campaign_name,objective,spend,impressions,reach,frequency,clicks,inline_link_clicks,ctr,cpc,cpm,actions,action_values"
+              },
+              {
+                "name": "time_range",
+                "value": "={{ JSON.stringify({ since: $today.minus({ days: 14 }).toFormat('yyyy-MM-dd'), until: $today.minus({ days: 8 }).toFormat('yyyy-MM-dd') }) }}"
+              },
+              {
+                "name": "limit",
+                "value": "500"
+              }
+            ]
+          }
+        }
+      },
+      "id": "bdec556a-f597-5eae-bca6-ffdfbc70692c",
+      "name": "Get the week before",
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        620,
+        0
+      ],
+      "credentials": {
+        "facebookGraphApi": {
+          "name": "Facebook Graph account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## 1. Pull the last two weeks",
+        "height": 300,
+        "width": 940,
+        "color": 7
+      },
+      "id": "2ebeebe2-bf25-56aa-9454-35051e62785e",
+      "name": "Section: Pull the last two weeks",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Conversions and revenue from Meta's actions arrays, for the action type you track\nconst ACTIONS = {\n  purchase: ['omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_web_purchase'],\n  lead: ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'onsite_web_lead'],\n  complete_registration: ['complete_registration', 'offsite_conversion.fb_pixel_complete_registration'],\n  messaging: ['onsite_conversion.messaging_conversation_started_7d'],\n};\nfunction pick(list, types) { for (const t of types) { const a = (list || []).find(x => x.action_type === t); if (a) return Number(a.value) || 0; } return 0; }\nfunction kpis(r, conv) {\n  const types = ACTIONS[conv] || [conv];\n  const spend = Number(r.spend) || 0, impressions = Number(r.impressions) || 0, clicks = Number(r.inline_link_clicks || r.clicks) || 0;\n  const conversions = pick(r.actions, types), revenue = pick(r.action_values, types);\n  return { name: r.campaign_name || r.ad_name || 'Total', id: r.campaign_id || r.ad_id || '', spend, impressions, clicks,\n    reach: Number(r.reach) || 0, frequency: Number(r.frequency) || (r.reach ? impressions / r.reach : 0),\n    ctr: impressions ? clicks / impressions * 100 : 0, cpc: clicks ? spend / clicks : 0, cpm: impressions ? spend / impressions * 1000 : 0,\n    conversions, revenue, cpa: conversions ? spend / conversions : null, roas: spend && revenue ? revenue / spend : null };\n}\nfunction total(rows) {\n  const t = rows.reduce((a, r) => ({ spend: a.spend + r.spend, impressions: a.impressions + r.impressions, clicks: a.clicks + r.clicks,\n    reach: a.reach + r.reach, conversions: a.conversions + r.conversions, revenue: a.revenue + r.revenue }),\n    { spend: 0, impressions: 0, clicks: 0, reach: 0, conversions: 0, revenue: 0 });\n  return { ...t, ctr: t.impressions ? t.clicks / t.impressions * 100 : 0, cpc: t.clicks ? t.spend / t.clicks : 0,\n    cpm: t.impressions ? t.spend / t.impressions * 1000 : 0, cpa: t.conversions ? t.spend / t.conversions : null, roas: t.spend && t.revenue ? t.revenue / t.spend : null };\n}\nconst pct = (a, b) => (a === null || b === null || !b) ? null : Math.round((a - b) / b * 100);\n\n// Week over week per campaign, account totals and rule-based flags\nfunction compare(cfg, curRows, prevRows) {\n  const conv = cfg.conversion_action || 'purchase';\n  const cur = (curRows || []).map(r => kpis(r, conv)).filter(r => r.spend > 0 || r.impressions > 0);\n  const prevMap = Object.fromEntries((prevRows || []).map(r => kpis(r, conv)).map(r => [r.id, r]));\n  const T = total(cur), P = total(Object.values(prevMap));\n  const tCpa = Number(cfg.target_cpa) || 0, tRoas = Number(cfg.target_roas) || 0;\n  const flags = [], wins = [];\n  for (const c of cur) {\n    const p = prevMap[c.id];\n    c.spend_change = p ? pct(c.spend, p.spend) : null; c.cpa_change = p ? pct(c.cpa, p.cpa) : null; c.conv_change = p ? pct(c.conversions, p.conversions) : null;\n    if (c.spend >= Math.max(20, tCpa) && c.conversions === 0) flags.push(`${c.name}: spent ${c.spend.toFixed(2)} with no ${conv}s`);\n    if (tCpa && c.cpa && c.cpa > tCpa * 1.3) flags.push(`${c.name}: CPA ${c.cpa.toFixed(2)} is ${Math.round((c.cpa / tCpa - 1) * 100)}% above target ${tCpa}`);\n    if (tRoas && c.roas !== null && c.roas < tRoas * 0.7 && c.spend > 20) flags.push(`${c.name}: ROAS ${c.roas.toFixed(2)} vs target ${tRoas}`);\n    if (c.impressions > 1000 && c.ctr < Number(cfg.min_ctr || 0.8)) flags.push(`${c.name}: link CTR ${c.ctr.toFixed(2)}% is low`);\n    if (c.frequency > Number(cfg.max_frequency || 3)) flags.push(`${c.name}: frequency ${c.frequency.toFixed(1)} (ad fatigue risk)`);\n    if (c.cpa_change !== null && c.cpa_change <= -15 && c.conversions >= 3) wins.push(`${c.name}: CPA down ${-c.cpa_change}% to ${c.cpa.toFixed(2)}`);\n    if (tRoas && c.roas !== null && c.roas >= tRoas && c.spend > 20) wins.push(`${c.name}: ROAS ${c.roas.toFixed(2)} beats target`);\n  }\n  cur.sort((a, b) => b.spend - a.spend);\n  const d = { spend: pct(T.spend, P.spend), conversions: pct(T.conversions, P.conversions), cpa: pct(T.cpa, P.cpa), roas: pct(T.roas, P.roas), ctr: pct(T.ctr, P.ctr) };\n  const f = n => n === null || n === undefined ? 'n/a' : Number(n).toFixed(2);\n  const ch = v => v === null ? '' : ` (${v >= 0 ? '+' : ''}${v}% WoW)`;\n  const facts = `Account ${cfg.client_name || cfg.ad_account_id}, ${cfg.period}. Conversion = ${conv}. ` +\n    `Totals: spend ${f(T.spend)}${ch(d.spend)}, ${T.conversions} conversions${ch(d.conversions)}, CPA ${f(T.cpa)}${ch(d.cpa)}, ROAS ${f(T.roas)}${ch(d.roas)}, link CTR ${f(T.ctr)}%${ch(d.ctr)}. ` +\n    `Targets: CPA ${tCpa || 'none'}, ROAS ${tRoas || 'none'}. Campaigns: ` +\n    cur.slice(0, 15).map(c => `${c.name} spend ${f(c.spend)}${ch(c.spend_change)}, conv ${c.conversions}, CPA ${f(c.cpa)}, ROAS ${f(c.roas)}, CTR ${f(c.ctr)}%, freq ${f(c.frequency)}`).join('; ') +\n    `. Rule flags: ${flags.join('; ') || 'none'}. Wins: ${wins.join('; ') || 'none'}.`;\n  return { totals: T, previous: P, deltas: d, campaigns: cur, flags, wins, facts, has_data: cur.length > 0 };\n}\n\nconst cfg = { ...$('Set report settings').first().json, period: `${$today.minus({ days: 7 }).toFormat('d LLL')} - ${$today.minus({ days: 1 }).toFormat('d LLL yyyy')}` };\nconst res = compare(cfg, $('Get last week by campaign').first().json.data, $('Get the week before').first().json.data);\nreturn [{ json: { ...cfg, ...res } }];"
+      },
+      "id": "c2e3401e-6413-549f-a713-275fdeb20170",
+      "name": "Compare weeks and flag campaigns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Calculate KPIs",
+        "height": 300,
+        "width": 220,
+        "color": 7
+      },
+      "id": "e0a0a2fc-0f07-508d-9401-02615af8e071",
+      "name": "Section: Calculate KPIs",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        860,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a senior paid-social analyst writing the weekly Meta Ads note for a busy business owner. Use ONLY the numbers below; never invent figures or campaigns. Mention currency amounts without symbols.\n\n{{ $json.facts }}\n\nReturn:\n- headline: one sentence, max 18 words, the most important thing this week.\n- wins: 1-3 items, each max 20 words, with the number that proves it.\n- problems: 1-3 items, each max 20 words, with the number.\n- actions: 2-4 specific next steps (pause, shift budget, refresh creative, test audience), each max 20 words.\nIf there was no spend, say so in the headline and keep the lists short.",
+        "hasOutputParser": true
+      },
+      "id": "37a91719-a4e9-54b7-91fb-bcb797f95820",
+      "name": "Write performance insights",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1220,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "7d7cfb39-ae8b-5102-b8c6-7c84086ffa20",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1220,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"headline\": \"Spend steady, CPA down 12% thanks to the retargeting campaign\",\n  \"wins\": [\n    \"Retargeting CPA fell 22% to 18.40\"\n  ],\n  \"problems\": [\n    \"Prospecting - Broad spent 240 with no purchases\"\n  ],\n  \"actions\": [\n    \"Pause the two zero-purchase ad sets in Prospecting - Broad\"\n  ]\n}"
+      },
+      "id": "562537b6-e3e4-5d1b-8bb5-191f5e46976d",
+      "name": "Insights format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1360,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n// HTML report: KPI tiles with week-over-week change, AI notes and a campaign table\nconst r = $('Compare weeks and flag campaigns').item.json;\nconst ai = $json.output || {};\nconst cur = r.currency || '';\nconst money = n => n === null || n === undefined ? '-' : `${cur}${Number(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;\nconst delta = (v, goodUp = true) => v === null || v === undefined ? '' : `<br><small style=\"color:${(v >= 0) === goodUp ? '#1a7f37' : '#c62828'}\">${v >= 0 ? '+' : ''}${v}% vs last week</small>`;\nconst tile = (label, val, d) => `<td style=\"padding:10px;border:1px solid #eee;text-align:center\"><small>${label}</small><br><b style=\"font-size:18px\">${val}</b>${d}</td>`;\nconst T = r.totals, D = r.deltas;\nconst tiles = `<table style=\"border-collapse:collapse\"><tr>${tile('Spend', money(T.spend), delta(D.spend, true))}${tile('Conversions', T.conversions, delta(D.conversions, true))}` +\n  `${tile('CPA', money(T.cpa), delta(D.cpa, false))}${tile('ROAS', T.roas === null ? '-' : T.roas.toFixed(2), delta(D.roas, true))}${tile('Link CTR', T.ctr.toFixed(2) + '%', delta(D.ctr, true))}</tr></table>`;\nconst li = a => (a || []).map(x => `<li>${esc(x)}</li>`).join('');\nconst rows = r.campaigns.slice(0, 15).map(c => `<tr><td>${esc(c.name)}</td><td align=\"right\">${money(c.spend)}</td><td align=\"right\">${c.conversions}</td><td align=\"right\">${money(c.cpa)}</td><td align=\"right\">${c.roas === null ? '-' : c.roas.toFixed(2)}</td><td align=\"right\">${c.ctr.toFixed(2)}%</td><td align=\"right\">${c.frequency.toFixed(1)}</td></tr>`).join('');\nconst html = `<h2>Meta Ads weekly report${r.client_name ? ': ' + esc(r.client_name) : ''}</h2><p>${esc(r.period)}</p>\n<p style=\"font-size:16px\"><b>${esc(ai.headline || '')}</b></p>${tiles}\n<h3>What worked</h3><ul>${li(ai.wins)}</ul><h3>What needs attention</h3><ul>${li(ai.problems)}</ul><h3>Next steps</h3><ol>${li(ai.actions)}</ol>\n<h3>Campaigns</h3><table cellpadding=\"5\" style=\"border-collapse:collapse;font-size:13px\"><tr><th align=\"left\">Campaign</th><th>Spend</th><th>Conv.</th><th>CPA</th><th>ROAS</th><th>CTR</th><th>Freq.</th></tr>${rows}</table>\n<p><small>Conversions = ${esc(r.conversion_action)}. Data from the Meta Marketing API; recent days can still change slightly.</small></p>`;\nreturn { json: { ...r, html, subject: `Meta Ads: ${money(T.spend)} spent, ${T.conversions} ${r.conversion_action}s, CPA ${money(T.cpa)} (${r.period})` } };"
+      },
+      "id": "a82dc8c6-449a-502e-b8ab-b1023ed2ab9b",
+      "name": "Build HTML report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.report_to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "5b077cba-d01f-59e9-90f1-fcb4453a3a3f",
+      "name": "Email the report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1820,
+        -80
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Write and send the report",
+        "height": 500,
+        "width": 820,
+        "color": 7
+      },
+      "id": "be79ae6d-6fae-539b-b1a5-fb258ef3b96a",
+      "name": "Section: Write and send the report",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "b89847aa-0e83-5b64-8f5f-76f06dbfd0b4",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "fbce6c03-0af6-58ca-bf0a-d3c0f30e27d7",
+      "position": [
+        140,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "3bf1e290-3970-5f1b-92e0-adcab92a20f4",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write performance insights",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insights format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write performance insights",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Monday at 8am": {
+      "main": [
+        [
+          {
+            "node": "Set report settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set report settings": {
+      "main": [
+        [
+          {
+            "node": "Get last week by campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get last week by campaign": {
+      "main": [
+        [
+          {
+            "node": "Get the week before",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get the week before": {
+      "main": [
+        [
+          {
+            "node": "Compare weeks and flag campaigns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare weeks and flag campaigns": {
+      "main": [
+        [
+          {
+            "node": "Write performance insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write performance insights": {
+      "main": [
+        [
+          {
+            "node": "Build HTML report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML report": {
+      "main": [
+        [
+          {
+            "node": "Email the report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
