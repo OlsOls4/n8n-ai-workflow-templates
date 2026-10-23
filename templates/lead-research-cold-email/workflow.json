@@ -1,0 +1,498 @@
+{
+  "name": "Write personalised cold email opening lines for Google Sheets leads with AI",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "dde196b6-cd12-5a7c-b485-b87757dfcd5c",
+      "name": "Start manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0751b098-24b0-5b4d-a395-73a1ac36e38b",
+              "name": "what_you_sell",
+              "value": "Done-for-you bookkeeping for small dental and physio clinics",
+              "type": "string"
+            },
+            {
+              "id": "c38bd266-8787-5fb2-a6dc-57bde0b21e04",
+              "name": "max_leads_per_run",
+              "value": 25,
+              "type": "number"
+            },
+            {
+              "id": "0310e3d7-3e3e-5df0-8fae-34cc4ad7cb41",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a4305cf6-82d3-543f-9310-df6aaffce99b",
+      "name": "Set your offer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        250,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set your offer').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "options": {}
+      },
+      "id": "18c13de5-7634-57a5-87cf-0ee3d3c0ad80",
+      "name": "Read leads from Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        500,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "39e0467a-8ebc-5b37-8cbe-db84edfa9ceb",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "c7ba91c9-ed19-5b95-95e0-06c44c608842",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a5ac28cc-db7f-55ca-87a4-afc3f18505ac",
+      "name": "Keep new leads",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        750,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "maxItems": "={{ $('Set your offer').first().json.max_leads_per_run }}"
+      },
+      "id": "9040d506-4603-547d-83ce-c62db021134f",
+      "name": "Limit leads per run",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Load leads\nLeads without a status are processed, up to max_leads_per_run.",
+        "height": 330,
+        "width": 1220,
+        "color": 7
+      },
+      "id": "87f02692-2d6b-5aca-a10e-8540fa8170cd",
+      "name": "Section: 1. Load leads",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -150
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write the opening line of a cold email to this lead. The pitch is written separately, so the line must stand on its own and lead naturally into a short pitch for: {{ $('Set your offer').first().json.what_you_sell }}\n\nLead:\nName: {{ $json.first_name }} {{ $json.last_name }}\nRole: {{ $json.role }}\nCompany: {{ $json.company }}\nWebsite: {{ $json.website }}\nNotes / research: {{ $json.notes || 'none' }}\n\nRules:\n- One sentence, max 25 words, about them (their company, a recent change, something specific in the notes), not about you.\n- Only use facts given above. If there is nothing specific, write an honest line about their role or industry and set confidence to \"low\".\n- No flattery clichés (\"I came across your profile\", \"I hope this email finds you well\", \"I love what you're doing\"), no questions, no emojis.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 5,
+          "delayBetweenBatches": 2000
+        }
+      },
+      "id": "c24ea8ee-8009-57fc-819d-89363ced4f79",
+      "name": "Write opening line with AI",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1350,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.6
+        }
+      },
+      "id": "d38bc63a-a84e-5b09-8d82-3961a195d5f3",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1350,
+        190
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"first_line\": \"Congrats on opening the second Brightside clinic in Leeds this spring, that must have doubled the admin overnight.\",\n  \"based_on\": \"notes: opened a second clinic\",\n  \"confidence\": \"high\"\n}"
+      },
+      "id": "ca940fed-8b9f-5cff-a694-2f40e28f9279",
+      "name": "Opening line JSON format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1490,
+        190
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Write the opening line with AI",
+        "height": 450,
+        "width": 340,
+        "color": 7
+      },
+      "id": "7bd08e40-118b-5e7a-ad63-bba14d944582",
+      "name": "Section: 2. Write the opening line with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1290,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set your offer').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $('Limit leads per run').item.json.email }}",
+            "first_line": "={{ $json.output.first_line }}",
+            "first_line_basis": "={{ $json.output.based_on }} ({{ $json.output.confidence }})",
+            "status": "first line written"
+          },
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": [
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "first_line",
+              "displayName": "first_line",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "first_line_basis",
+              "displayName": "first_line_basis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "273153fb-3727-5c9a-9fb6-39c077d4bcc9",
+      "name": "Save opening line to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1700,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Save to the sheet",
+        "height": 280,
+        "width": 300,
+        "color": 7
+      },
+      "id": "3e3b1673-7aac-581f-b631-01d7ae7f95c4",
+      "name": "Section: 3. Save to the sheet",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Write personalised cold email opening lines for Google Sheets leads with AI\n\nTurn a sheet of leads into specific, non-cheesy first lines for your cold emails, written from the details you already have.\n\n### How it works\n1. Run it manually whenever you add leads.\n2. Leads with an email and an empty `status` are read from the **Leads** tab, up to `max_leads_per_run`.\n3. Gemini writes one opening line per lead, using only the facts in the row (company, role, website, notes), and says what it based the line on and how confident it is.\n4. The line, its basis and a status are written back to the same row, so each lead is only processed once.\n\n### Setup\n1. Create a Google Sheet with a tab `Leads` and the columns `first_name, last_name, email, company, role, website, notes, first_line, first_line_basis, status`. The more you put in `notes` (a recent post, news, a detail from their site), the better the lines.\n2. Put the Sheet ID in **Set your offer** and add a **Google Sheets** credential.\n3. Add a **Google Gemini (PaLM) API** credential with a free key from aistudio.google.com.\n4. Describe your offer in **Set your offer** and click **Execute workflow**.\n\n### Customization\n- Change the rules in **Write opening line with AI** for a different length or style.\n- Swap the Manual Trigger for a Schedule Trigger to process new leads daily.\n- Clear a lead's `status` to regenerate its line.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 936,
+        "width": 580
+      },
+      "id": "e50f9436-c064-5772-8a55-cf0add18ca03",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        -150
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ee3c2f8a-0f44-5f82-b50c-b5119343c6bc",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1006
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "64542920-e1f0-5e2e-bf0c-871f742cb97f",
+      "position": [
+        240,
+        1006
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "f1f015a6-37e5-5346-b287-7b0493974497",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        846
+      ]
+    }
+  ],
+  "connections": {
+    "Start manually": {
+      "main": [
+        [
+          {
+            "node": "Set your offer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set your offer": {
+      "main": [
+        [
+          {
+            "node": "Read leads from Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read leads from Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Keep new leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep new leads": {
+      "main": [
+        [
+          {
+            "node": "Limit leads per run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit leads per run": {
+      "main": [
+        [
+          {
+            "node": "Write opening line with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write opening line with AI": {
+      "main": [
+        [
+          {
+            "node": "Save opening line to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write opening line with AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opening line JSON format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write opening line with AI",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
