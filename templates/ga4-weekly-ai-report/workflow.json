@@ -1,0 +1,672 @@
+{
+  "name": "Send a weekly Google Analytics 4 report with AI insights via Gmail",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Send a weekly Google Analytics 4 report with AI insights via Gmail\n\nGet a clear weekly website report in your inbox every Monday without opening Google Analytics. The workflow pulls last week's GA4 numbers and the week before, calculates the changes, and asks Google Gemini to write a short headline, wins, concerns and next actions in plain English. The numbers in the table come straight from GA4; the AI only writes the commentary.\n\n### How it works\n1. **Every Monday at 8am** starts the run; **Set report settings** holds your property ID and email.\n2. Four Google Analytics nodes fetch this week's and last week's users, sessions, page views, engaged sessions and key events, plus top pages and traffic sources.\n3. **Calculate week-over-week changes** totals each metric and works out percentage changes.\n4. **Write insights with AI** returns a headline, wins, concerns and actions as JSON.\n5. **Build report email** renders a tidy HTML table with green and red arrows and **Send report via Gmail** delivers it.\n\n### Setup\n1. Add a **Google Analytics OAuth2** credential (enable the Google Analytics Data API in Google Cloud) and select it on the four GA4 nodes.\n2. Add a free **Google Gemini (PaLM) API** credential and a **Gmail OAuth2** credential.\n3. In **Set report settings**, replace `YOUR_GA4_PROPERTY_ID` (Admin > Property details, numbers only), your site name and `YOUR_EMAIL_ADDRESS`.\n4. Run it once manually, then activate.\n\n### Customization\n- Swap `keyEvents` for a specific conversion, or add metrics in the GA4 nodes and **Calculate week-over-week changes**.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 900,
+        "width": 600
+      },
+      "id": "66a1a89a-e8df-52a9-abb5-e0fdc00e2504",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "62b85166-c017-58b7-8b2a-310b751e7923",
+      "name": "Every Monday at 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e9d53875-91c9-53b7-af90-5f365b83e3b9",
+              "name": "property_id",
+              "value": "YOUR_GA4_PROPERTY_ID",
+              "type": "string"
+            },
+            {
+              "id": "e7da7b1f-6d53-5571-a7cb-753d794e74ef",
+              "name": "site_name",
+              "value": "Your Website",
+              "type": "string"
+            },
+            {
+              "id": "82c6db5f-803c-57a8-984c-93eaee940dbb",
+              "name": "send_to",
+              "value": "YOUR_EMAIL_ADDRESS",
+              "type": "string"
+            },
+            {
+              "id": "3d485cd0-ff67-5064-8d39-516ae8cc0ce6",
+              "name": "brand_color",
+              "value": "#2f6feb",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3d833139-b10e-54bb-bcfc-dd502fe241d7",
+      "name": "Set report settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Schedule and settings",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "c4f85deb-16a0-52b6-b113-a9480e32cfb1",
+      "name": "Section: Schedule and settings",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "propertyId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set report settings').first().json.property_id }}"
+        },
+        "dateRange": "custom",
+        "startDate": "={{ $now.minus({ days: 7 }).toISODate() }}",
+        "endDate": "={{ $now.minus({ days: 1 }).toISODate() }}",
+        "metricsGA4": {
+          "metricValues": [
+            {
+              "listName": "totalUsers"
+            },
+            {
+              "listName": "other",
+              "name": "newUsers"
+            },
+            {
+              "listName": "sessions"
+            },
+            {
+              "listName": "screenPageViews"
+            },
+            {
+              "listName": "other",
+              "name": "engagedSessions"
+            },
+            {
+              "listName": "other",
+              "name": "keyEvents"
+            }
+          ]
+        },
+        "dimensionsGA4": {
+          "dimensionValues": [
+            {
+              "listName": "date"
+            }
+          ]
+        },
+        "additionalFields": {},
+        "returnAll": true
+      },
+      "id": "811aba46-b535-5d54-96d1-ac85f91023fb",
+      "name": "Get this week's traffic",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "googleAnalyticsOAuth2": {
+          "name": "Google Analytics account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "propertyId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set report settings').first().json.property_id }}"
+        },
+        "dateRange": "custom",
+        "startDate": "={{ $now.minus({ days: 14 }).toISODate() }}",
+        "endDate": "={{ $now.minus({ days: 8 }).toISODate() }}",
+        "metricsGA4": {
+          "metricValues": [
+            {
+              "listName": "totalUsers"
+            },
+            {
+              "listName": "other",
+              "name": "newUsers"
+            },
+            {
+              "listName": "sessions"
+            },
+            {
+              "listName": "screenPageViews"
+            },
+            {
+              "listName": "other",
+              "name": "engagedSessions"
+            },
+            {
+              "listName": "other",
+              "name": "keyEvents"
+            }
+          ]
+        },
+        "dimensionsGA4": {
+          "dimensionValues": [
+            {
+              "listName": "date"
+            }
+          ]
+        },
+        "additionalFields": {},
+        "returnAll": true
+      },
+      "id": "9fdd4367-f65d-5b35-90b1-6ea73f8c6e7c",
+      "name": "Get last week's traffic",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ],
+      "credentials": {
+        "googleAnalyticsOAuth2": {
+          "name": "Google Analytics account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "propertyId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set report settings').first().json.property_id }}"
+        },
+        "dateRange": "custom",
+        "startDate": "={{ $now.minus({ days: 7 }).toISODate() }}",
+        "endDate": "={{ $now.minus({ days: 1 }).toISODate() }}",
+        "metricsGA4": {
+          "metricValues": [
+            {
+              "listName": "screenPageViews"
+            }
+          ]
+        },
+        "dimensionsGA4": {
+          "dimensionValues": [
+            {
+              "listName": "other",
+              "name": "pagePath"
+            }
+          ]
+        },
+        "additionalFields": {
+          "orderByUI": {
+            "metricOrderBy": [
+              {
+                "desc": true,
+                "metricName": "screenPageViews"
+              }
+            ]
+          }
+        },
+        "limit": 10
+      },
+      "id": "28f83315-998c-57bf-8444-c51410070df5",
+      "name": "Get top pages",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ],
+      "credentials": {
+        "googleAnalyticsOAuth2": {
+          "name": "Google Analytics account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "propertyId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set report settings').first().json.property_id }}"
+        },
+        "dateRange": "custom",
+        "startDate": "={{ $now.minus({ days: 7 }).toISODate() }}",
+        "endDate": "={{ $now.minus({ days: 1 }).toISODate() }}",
+        "metricsGA4": {
+          "metricValues": [
+            {
+              "listName": "sessions"
+            }
+          ]
+        },
+        "dimensionsGA4": {
+          "dimensionValues": [
+            {
+              "listName": "other",
+              "name": "sessionSourceMedium"
+            }
+          ]
+        },
+        "additionalFields": {
+          "orderByUI": {
+            "metricOrderBy": [
+              {
+                "desc": true,
+                "metricName": "sessions"
+              }
+            ]
+          }
+        },
+        "limit": 10
+      },
+      "id": "0a92379e-0da5-589e-b18f-a9ee6035a2af",
+      "name": "Get top traffic sources",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        0
+      ],
+      "credentials": {
+        "googleAnalyticsOAuth2": {
+          "name": "Google Analytics account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "content": "## 2. Pull GA4 data",
+        "height": 300,
+        "width": 940,
+        "color": 7
+      },
+      "id": "bf55df7d-6920-5d8d-b8f4-f5b40c20c6d0",
+      "name": "Section: Pull GA4 data",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Totals for this week vs last week, plus top pages and sources\nconst sum = (rows, k) => rows.reduce((t, r) => t + (Number(r[k]) || 0), 0);\nconst cur = $('Get this week\\'s traffic').all().map(i => i.json);\nconst prev = $('Get last week\\'s traffic').all().map(i => i.json);\nconst metrics = ['totalUsers', 'newUsers', 'sessions', 'screenPageViews', 'keyEvents'];\nconst labels = { totalUsers: 'Users', newUsers: 'New users', sessions: 'Sessions', screenPageViews: 'Page views', keyEvents: 'Key events' };\nconst kpis = metrics.map(m => { const c = sum(cur, m), p = sum(prev, m);\n  return { metric: labels[m], current: Math.round(c), previous: Math.round(p), change_pct: p ? Math.round(1000 * (c - p) / p) / 10 : null }; });\nconst engaged = sum(cur, 'engagedSessions'), sess = sum(cur, 'sessions');\nconst top_pages = $('Get top pages').all().map(i => i.json).slice(0, 8).map(r => ({ page: r.pagePath, views: Number(r.screenPageViews) }));\nconst top_sources = $('Get top traffic sources').all().map(i => i.json).slice(0, 8).map(r => ({ source: r.sessionSourceMedium, sessions: Number(r.sessions) }));\nreturn [{ json: { kpis, engagement_rate_pct: sess ? Math.round(1000 * engaged / sess) / 10 : null, top_pages, top_sources } }];"
+      },
+      "id": "0dcb1627-ffe5-5a53-a030-67aaec5b54d6",
+      "name": "Calculate week-over-week changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a web analytics consultant writing a weekly note for a busy small-business owner. Use ONLY the numbers below; do not invent causes you cannot see in the data. Mention percentages from the data.\n\nSite: {{ $('Set report settings').first().json.site_name }}\nKPIs (this week vs last week): {{ JSON.stringify($json.kpis) }}\nEngagement rate this week: {{ $json.engagement_rate_pct }}%\nTop pages: {{ JSON.stringify($json.top_pages) }}\nTop sources: {{ JSON.stringify($json.top_sources) }}\n\nReturn a headline under 12 words, 3 wins, up to 3 concerns and 3 specific next actions (each under 20 words).",
+        "hasOutputParser": true
+      },
+      "id": "5adefca9-6a2e-52ba-9e76-2682c957a737",
+      "name": "Write insights with AI",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1700,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "d186e145-5aed-5f92-afb4-6b92ea1b57cb",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"headline\": \"Traffic up 12% with organic search leading the growth\",\n  \"wins\": [\n    \"Organic sessions +18% week over week\"\n  ],\n  \"concerns\": [\n    \"Engagement rate fell 3 points\"\n  ],\n  \"actions\": [\n    \"Refresh the top landing page's call to action\"\n  ]\n}"
+      },
+      "id": "e7502ff4-47ae-5c9f-8519-2e53721f980b",
+      "name": "Insights format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1840,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Compare and write insights",
+        "height": 500,
+        "width": 580,
+        "color": 7
+      },
+      "id": "3e81a7bb-b172-52d7-af5b-e510bfc0f1e3",
+      "name": "Section: Compare and write insights",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Branded HTML email: KPI table with coloured deltas, AI insights, top pages and sources\nconst e = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst d = $('Calculate week-over-week changes').first().json; const ai = $json.output; const s = $('Set report settings').first().json;\nconst delta = v => v === null ? '–' : `<span style=\"color:${v >= 0 ? '#1a7f37' : '#cf222e'}\">${v >= 0 ? '▲' : '▼'} ${Math.abs(v)}%</span>`;\nconst rows = d.kpis.map(k => `<tr><td style=\"padding:6px 12px\">${k.metric}</td><td style=\"padding:6px 12px;text-align:right\"><b>${k.current.toLocaleString()}</b></td><td style=\"padding:6px 12px;text-align:right;color:#666\">${k.previous.toLocaleString()}</td><td style=\"padding:6px 12px;text-align:right\">${delta(k.change_pct)}</td></tr>`).join('');\nconst li = a => (a || []).map(x => `<li>${e(x)}</li>`).join('');\nconst html = `<div style=\"font-family:Arial,sans-serif;max-width:640px\"><h2 style=\"color:${s.brand_color || '#111'}\">${e(s.site_name)}: weekly report</h2>` +\n `<p style=\"font-size:16px\"><b>${e(ai.headline)}</b></p><table style=\"border-collapse:collapse;width:100%;border:1px solid #eee\"><tr style=\"background:#f6f8fa\"><th align=\"left\" style=\"padding:6px 12px\">Metric</th><th align=\"right\" style=\"padding:6px 12px\">This week</th><th align=\"right\" style=\"padding:6px 12px\">Last week</th><th align=\"right\" style=\"padding:6px 12px\">Change</th></tr>${rows}</table>` +\n `<p>Engagement rate: ${d.engagement_rate_pct ?? '–'}%</p><h3>Wins</h3><ul>${li(ai.wins)}</ul><h3>Watch</h3><ul>${li(ai.concerns)}</ul><h3>Next actions</h3><ul>${li(ai.actions)}</ul>` +\n `<h3>Top pages</h3><ol>${d.top_pages.map(p => `<li>${e(p.page)} (${p.views})</li>`).join('')}</ol><h3>Top sources</h3><ol>${d.top_sources.map(p => `<li>${e(p.source)} (${p.sessions})</li>`).join('')}</ol></div>`;\nreturn [{ json: { html, subject: `${s.site_name} weekly report: ${ai.headline}` } }];"
+      },
+      "id": "1ad7464f-e458-50d8-82a7-267347d34075",
+      "name": "Build report email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2120,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Set report settings').first().json.send_to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "21deacca-fd29-52fb-b7bd-942fe4ea688d",
+      "name": "Send report via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2360,
+        -80
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Email the report",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "3ff1fc4d-c730-50e5-a7d2-781db99f2759",
+      "name": "Section: Email the report",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2060,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "236c2b73-3363-5a03-a377-9fe55e279687",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "021c967a-fb31-5716-ad94-f2ebe3034561",
+      "position": [
+        140,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "27f89099-ccbf-530b-bf28-3c4cd87d5d0c",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write insights with AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insights format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write insights with AI",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Monday at 8am": {
+      "main": [
+        [
+          {
+            "node": "Set report settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set report settings": {
+      "main": [
+        [
+          {
+            "node": "Get this week's traffic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get this week's traffic": {
+      "main": [
+        [
+          {
+            "node": "Get last week's traffic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get last week's traffic": {
+      "main": [
+        [
+          {
+            "node": "Get top pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get top pages": {
+      "main": [
+        [
+          {
+            "node": "Get top traffic sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get top traffic sources": {
+      "main": [
+        [
+          {
+            "node": "Calculate week-over-week changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate week-over-week changes": {
+      "main": [
+        [
+          {
+            "node": "Write insights with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write insights with AI": {
+      "main": [
+        [
+          {
+            "node": "Build report email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report email": {
+      "main": [
+        [
+          {
+            "node": "Send report via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
