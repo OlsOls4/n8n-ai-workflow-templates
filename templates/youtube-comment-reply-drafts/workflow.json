@@ -1,0 +1,551 @@
+{
+  "name": "Draft replies to new YouTube comments with Gemini and review them in Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Draft replies to new YouTube comments with Gemini and review them in Google Sheets\n\nReply to more of your YouTube comments in less time. Every six hours this workflow finds new, unanswered comments on your latest videos, sorts them (question, praise, criticism, collaboration, spam) and has Google Gemini draft a reply in your channel's voice. Everything lands in a Google Sheet with a direct link to the comment, so you can copy, tweak and post the good ones in seconds. Nothing is posted automatically.\n\n### How it works\n1. **Every 6 hours** starts the run. Your five newest uploads come from the channel's free RSS feed (no API quota).\n2. **Get comment threads** calls the official YouTube Data API for each video.\n3. **Pick new unanswered comments** keeps recent top-level comments with no reply that aren't yours.\n4. **Skip comments already drafted** removes anything seen in earlier runs.\n5. **Draft reply with AI** returns category, priority and a reply; spam and emoji-only comments are dropped.\n6. Drafts are appended to Google Sheets, highest priority first.\n\n### Setup\n1. Add a **YouTube OAuth2** credential (YouTube Data API v3 enabled) and a free **Google Gemini (PaLM) API** credential.\n2. Put your channel ID (starts with `UC`) and voice in **Set channel and settings**.\n3. Create a sheet with a `Comments` tab and header row: `drafted_at, priority, category, video_title, author, comment, reply_draft, summary, link, comment_id, status`. Put the Sheet ID in **Set channel and settings**.\n4. Activate.\n\n### Customization\n- Change `lookback_hours` or the schedule.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 960,
+        "width": 600
+      },
+      "id": "d85f2545-0e13-5bbd-be49-ee40257d09ea",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "d3a29dd0-d87e-5a11-b6b6-7b5f8c97112d",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3cdd4b67-6cc7-50d0-844f-4680ec2c7672",
+              "name": "channel_id",
+              "value": "YOUR_CHANNEL_ID",
+              "type": "string"
+            },
+            {
+              "id": "af79e720-8913-50b4-8cb2-f62e7a6a763c",
+              "name": "channel_voice",
+              "value": "Friendly, practical and a bit nerdy. Uses first names, short sentences, no corporate speak.",
+              "type": "string"
+            },
+            {
+              "id": "fba33f05-98d1-5de7-aa44-361529f01214",
+              "name": "lookback_hours",
+              "value": 48,
+              "type": "number"
+            },
+            {
+              "id": "8fbe3822-a84e-5cb8-91cd-0845ee201f2e",
+              "name": "max_comments_per_run",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "e6e9dd71-e15f-5063-9508-5d1741808cbd",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2779eb78-1298-5058-8f2a-a713027e45b7",
+      "name": "Set channel and settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.youtube.com/feeds/videos.xml?channel_id={{ $json.channel_id }}",
+        "options": {}
+      },
+      "id": "0003bd44-fd1b-5e82-8897-49961ee93b2f",
+      "name": "Read latest videos from RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The 5 newest uploads are where almost all new comments land\nreturn $input.all().slice(0, 5).map(i => ({ json: { video_id: String(i.json.id || '').replace('yt:video:', ''), title: i.json.title } }));"
+      },
+      "id": "cfac42dd-8e06-5b54-83b5-29d478ddde40",
+      "name": "Keep recent videos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Find your latest videos",
+        "height": 300,
+        "width": 940,
+        "color": 7
+      },
+      "id": "f0f181fa-095d-56c9-81c2-7ddf69feb096",
+      "name": "Section: Find your latest videos",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/commentThreads",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "videoId",
+              "value": "={{ $json.video_id }}"
+            },
+            {
+              "name": "order",
+              "value": "time"
+            },
+            {
+              "name": "maxResults",
+              "value": "50"
+            },
+            {
+              "name": "textFormat",
+              "value": "plainText"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c771a293-ca05-51bb-bfe3-3a5f156b1ac9",
+      "name": "Get comment threads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        920,
+        0
+      ],
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "name": "YouTube account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten comment threads; keep recent top-level comments with no reply yet that weren't written by the channel\nconst s = $('Set channel and settings').first().json;\nconst since = DateTime.now().minus({ hours: s.lookback_hours });\nconst out = [];\n$input.all().forEach((item, i) => {\n  const video = $('Keep recent videos').itemMatching(i).json;\n  for (const t of item.json.items || []) {\n    const c = t.snippet.topLevelComment.snippet;\n    if (t.snippet.totalReplyCount > 0) continue;\n    if (c.authorChannelId?.value === s.channel_id) continue;\n    if (DateTime.fromISO(c.publishedAt) < since) continue;\n    out.push({ json: { comment_id: t.snippet.topLevelComment.id, video_id: video.video_id, video_title: video.title,\n      author: c.authorDisplayName, text: (c.textOriginal || '').slice(0, 1500), likes: c.likeCount, published_at: c.publishedAt,\n      link: `https://www.youtube.com/watch?v=${video.video_id}&lc=${t.snippet.topLevelComment.id}` } });\n  }\n});\nreturn out.slice(0, s.max_comments_per_run);"
+      },
+      "id": "c9cdb110-1113-5fb9-b079-adb15bbbadf9",
+      "name": "Pick new unanswered comments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.comment_id }}",
+        "options": {}
+      },
+      "id": "ff77cd57-8f5a-51c3-a1a1-a00825c69f1f",
+      "name": "Skip comments already drafted",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Collect new comments",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "38090e98-f5de-58a0-bed4-3d04528909cf",
+      "name": "Section: Collect new comments",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        860,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You help a YouTube creator reply to comments on their videos.\n\nChannel voice: {{ $('Set channel and settings').first().json.channel_voice }}\nVideo title: {{ $json.video_title }}\nComment by {{ $json.author }}:\n\"{{ $json.text }}\"\n\nRules:\n- category: question, praise, feedback, criticism, collaboration, spam or other.\n- needs_reply: false for spam, emoji-only, or comments that need no answer.\n- priority: high for questions, collaboration or business enquiries and constructive criticism; normal for praise and feedback; low otherwise.\n- reply: under 60 words in the channel's voice, specific to the comment, friendly, no hashtags, no links unless the comment asks for a resource (then say \"linked in the description\"). Never promise things the creator has not said. Empty string if needs_reply is false.\n- Never state facts (version numbers, prices, dates, specs, URLs) that are not in the video title, the comment or the facts given above. If the answer needs a fact you do not have, thank them and say the creator will follow up or point them to the description.\n- summary: under 10 words.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 5,
+          "delayBetweenBatches": 5000
+        }
+      },
+      "id": "fb2092a3-530a-5620-ad98-259ac1423fa7",
+      "name": "Draft reply with AI",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1700,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "id": "6440e8f7-8914-5bd1-9b5a-0cfb74e2e618",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"category\": \"question\",\n  \"priority\": \"high\",\n  \"needs_reply\": true,\n  \"reply\": \"Great question! The template is linked in the description; start with step 2 if you already have n8n.\",\n  \"summary\": \"Asks where to find the template\"\n}"
+      },
+      "id": "56b3095b-d1bd-591b-8497-76f1e9e383c9",
+      "name": "Reply format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1840,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Draft replies with AI",
+        "height": 500,
+        "width": 340,
+        "color": 7
+      },
+      "id": "399b4238-efcc-5d0d-bb68-416dba62c820",
+      "name": "Section: Draft replies with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Join each AI result to its comment, drop ones that need no reply, sort by priority\nconst rank = { high: 0, normal: 1, low: 2 };\nreturn $input.all().map((item, i) => ({ c: $('Skip comments already drafted').itemMatching(i).json, o: item.json.output }))\n  .filter(x => x.o.needs_reply)\n  .sort((a, b) => (rank[a.o.priority] ?? 3) - (rank[b.o.priority] ?? 3))\n  .map(({ c, o }) => ({ json: { drafted_at: $now.toFormat('yyyy-MM-dd HH:mm'), priority: o.priority, category: o.category,\n    video_title: c.video_title, author: c.author, comment: c.text, reply_draft: o.reply, summary: o.summary, link: c.link,\n    comment_id: c.comment_id, status: 'to review' } }));"
+      },
+      "id": "c48d4063-cbb9-5b56-ab31-23d0b2acb5e6",
+      "name": "Prepare review rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2120,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set channel and settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Comments"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "4ff8268b-e2a2-5a4e-8343-683188db110d",
+      "name": "Save drafts to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2360,
+        -80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Save drafts for review",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "045e23f2-5047-55b3-8070-cb380fdea496",
+      "name": "Section: Save drafts for review",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2060,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a8be73ab-16c8-5d43-88ad-c55a2cbe43ad",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "cf4ab60f-5927-52b0-904c-1357f74ec30b",
+      "position": [
+        140,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "2f205d2a-d27f-539d-b5bd-1433153ba077",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Draft reply with AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Draft reply with AI",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "node": "Set channel and settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set channel and settings": {
+      "main": [
+        [
+          {
+            "node": "Read latest videos from RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read latest videos from RSS": {
+      "main": [
+        [
+          {
+            "node": "Keep recent videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep recent videos": {
+      "main": [
+        [
+          {
+            "node": "Get comment threads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get comment threads": {
+      "main": [
+        [
+          {
+            "node": "Pick new unanswered comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick new unanswered comments": {
+      "main": [
+        [
+          {
+            "node": "Skip comments already drafted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip comments already drafted": {
+      "main": [
+        [
+          {
+            "node": "Draft reply with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft reply with AI": {
+      "main": [
+        [
+          {
+            "node": "Prepare review rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare review rows": {
+      "main": [
+        [
+          {
+            "node": "Save drafts to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
