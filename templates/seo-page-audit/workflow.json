@@ -1,0 +1,605 @@
+{
+  "name": "Audit any web page for on-page SEO issues from an n8n form with Gemini recommendations",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Audit any web page for on-page SEO issues from an n8n form with Gemini recommendations\n\nPaste a URL (and optionally a target keyword) into a hosted n8n form and get a scored on-page SEO audit in about 20 seconds: 17 technical and content checks run in code, then Gemini turns the failures into a prioritised fix list with a rewritten title and meta description. Useful for freelancers and agencies auditing prospects, and for business owners checking their own pages. Needs only a free Gemini key.\n\n### How it works\n1. **SEO audit form** collects the page URL and keyword. **Check the URL** adds https:// and validates it.\n2. **Fetch page HTML** and **Fetch robots.txt** download the page (redirects followed) and the site's robots rules.\n3. **Extract on-page signals** parses title, meta description, canonical, robots meta, headings, word count, image alt text, links, lang, viewport, Open Graph, JSON-LD and keyword placement, then scores weighted checks to 0-100.\n4. **Write SEO recommendations** asks Gemini for 3-6 concrete fixes, a 30-60 character title and a 120-155 character meta description, using only facts from the page.\n5. **Show audit report** displays the result. Pages that fail to load get a clear error page.\n\n### Setup\n1. Add a **Google Gemini (PaLM) API** credential (free key from aistudio.google.com).\n2. Activate the workflow and open the form's production URL.\n\n### Customization\n- Change check weights inside **Extract on-page signals**.\n- Add a Gmail or Google Sheets node after **Build audit report** to email reports or log leads.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "e472621b-768f-544a-9099-5673c882eab1",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Free on-page SEO audit",
+        "formDescription": "Enter a page URL. You'll get a score, the issues found and a prioritised fix list.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Page URL",
+              "fieldName": "url",
+              "fieldType": "text",
+              "requiredField": true,
+              "placeholder": "https://example.com/services"
+            },
+            {
+              "fieldLabel": "Target keyword (optional)",
+              "fieldName": "keyword",
+              "fieldType": "text",
+              "placeholder": "e.g. emergency plumber leeds"
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Audit page"
+        }
+      },
+      "id": "8f78bbd0-fceb-5723-8da2-a3531a6c085a",
+      "name": "SEO audit form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "86315e2c-f220-523e-a83f-34ec23a6b7e5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = String($json.url || '').trim();\nconst url = /^https?:\\/\\//i.test(raw) ? raw : 'https://' + raw;\nconst m = url.match(/^(https?):\\/\\/([a-z0-9.-]+\\.[a-z]{2,})(:\\d+)?([\\/?#][^\\s]*)?$/i);\nif (!m || /\\s/.test(raw)) return [{ json: { ok: false, url: raw } }];\nconst origin = `${m[1].toLowerCase()}://${m[2].toLowerCase()}${m[3] || ''}`;\nreturn [{ json: { ok: true, url: origin + (m[4] || '/'), origin, keyword: String($json.keyword || '').trim() } }];"
+      },
+      "id": "16d69b5d-6375-50ba-b57d-057b37aa0d32",
+      "name": "Check the URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "03d8d449-7a34-5e01-a3e4-4bb3f295271a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "fab45367-337b-5591-9e09-403942e53d24",
+      "name": "Is the URL valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Receive the URL",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "a8299433-ac1d-5bf8-9d29-c13d020dcaa8",
+      "name": "Section: Receive the URL",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n-workflow/1.0)"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "id": "6e246d14-ff06-5c0a-b10e-dce5e9002817",
+      "name": "Fetch page HTML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        680,
+        -80
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Check the URL').first().json.origin }}/robots.txt",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n-workflow/1.0)"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "id": "44e0d7d4-d7c7-5601-9bb3-57cc68a66825",
+      "name": "Fetch robots.txt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        920,
+        -80
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// URL helpers (no dependency on the URL global, which some n8n sandboxes lack)\nconst splitUrl = u => { const m = String(u || '').trim().match(/^(https?):\\/\\/([^\\/?#\\s]+)([^#\\s]*)/i); return m ? { origin: `${m[1].toLowerCase()}://${m[2].toLowerCase()}`, host: m[2].toLowerCase(), path: (m[3] || '/').split('?')[0] || '/', full: `${m[1].toLowerCase()}://${m[2].toLowerCase()}${m[3] || '/'}` } : null; };\nconst resolveUrl = (h, base) => { h = String(h || '').trim(); const b = splitUrl(base); if (!b) return ''; if (/^https?:\\/\\//i.test(h)) return h.split('#')[0]; if (h.startsWith('//')) return (b.origin.split(':')[0] + ':' + h).split('#')[0]; if (h.startsWith('/')) return (b.origin + h).split('#')[0]; const dir = b.path.replace(/[^\\/]*$/, ''); return (b.origin + dir + h).split('#')[0].replace(/\\/\\.\\//g, '/'); };\nfunction analyse(html, url, status, keyword, robotsTxt) {\n  html = String(html || '');\n  const strip = s => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '\"').replace(/&#39;|&rsquo;/g, \"'\").replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/&#(\\d+);/g, (m, d) => String.fromCharCode(Number(d))).replace(/\\s+/g, ' ').trim();\n  const attr = (tag, name) => { const m = tag.match(new RegExp(name + '\\\\s*=\\\\s*(\"([^\"]*)\"|\\'([^\\']*)\\'|([^\\\\s>]+))', 'i')); return m ? (m[2] ?? m[3] ?? m[4] ?? '') : null; };\n  const metas = html.match(/<meta\\b[^>]*>/gi) || [];\n  const meta = key => { const t = metas.find(m => (attr(m, 'name') || attr(m, 'property') || '').toLowerCase() === key); return t ? strip(attr(t, 'content')) : ''; };\n  const links = html.match(/<link\\b[^>]*>/gi) || [];\n  const title = strip((html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i) || [])[1]);\n  const description = meta('description');\n  const canonicalTag = links.find(l => /rel\\s*=\\s*[\"']?canonical/i.test(l));\n  const canonical = canonicalTag ? attr(canonicalTag, 'href') : '';\n  const robots = meta('robots').toLowerCase();\n  const h1s = (html.match(/<h1\\b[^>]*>[\\s\\S]*?<\\/h1>/gi) || []).map(strip).filter(Boolean);\n  const h2s = (html.match(/<h2\\b[^>]*>[\\s\\S]*?<\\/h2>/gi) || []).map(strip).filter(Boolean);\n  const body = (html.match(/<body[^>]*>([\\s\\S]*)<\\/body>/i) || [, html])[1]\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ').replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<noscript[\\s\\S]*?<\\/noscript>/gi, ' ')\n    .replace(/<(nav|footer|header)\\b[\\s\\S]*?<\\/\\1>/gi, ' ');\n  const text = strip(body);\n  const words = text ? text.split(' ').length : 0;\n  const imgs = html.match(/<img\\b[^>]*>/gi) || [];\n  const noAlt = imgs.filter(i => { const a = attr(i, 'alt'); return a === null || (!a.trim() && !/role=[\"']presentation/i.test(i)); }).length;\n  let origin = '', path = '/';\n  const su = splitUrl(url); if (su) { origin = su.origin; path = su.path; }\n  const hrefs = (html.match(/<a\\b[^>]*href\\s*=\\s*[\"'][^\"']+[\"'][^>]*>/gi) || []).map(a => attr(a, 'href')).filter(h => h && !/^(#|mailto:|tel:|javascript:)/i.test(h));\n  const abs = hrefs.map(h => resolveUrl(h, url)).filter(Boolean);\n  const internal = [...new Set(abs.filter(h => h.startsWith(origin)))];\n  const external = [...new Set(abs.filter(h => !h.startsWith(origin)))];\n  const lang = (html.match(/<html\\b[^>]*\\blang\\s*=\\s*[\"']?([a-zA-Z-]+)/i) || [])[1] || '';\n  const viewport = metas.some(m => (attr(m, 'name') || '').toLowerCase() === 'viewport');\n  const jsonLd = (html.match(/<script[^>]*application\\/ld\\+json[^>]*>([\\s\\S]*?)<\\/script>/gi) || []);\n  const schemaTypes = [...new Set(jsonLd.map(s => (s.match(/\"@type\"\\s*:\\s*\"([^\"]+)\"/g) || []).map(t => t.split('\"')[3])).flat())].slice(0, 6);\n  // robots.txt: is this path disallowed for all crawlers? is a sitemap declared?\n  let disallowed = false, sitemapDeclared = false;\n  if (robotsTxt) {\n    sitemapDeclared = /^\\s*sitemap\\s*:/im.test(robotsTxt);\n    let applies = false;\n    for (const line of String(robotsTxt).split(/\\r?\\n/)) {\n      const [k, ...rest] = line.split(':'); const v = rest.join(':').trim(); const key = (k || '').trim().toLowerCase();\n      if (key === 'user-agent') applies = v === '*';\n      else if (applies && key === 'disallow' && v && path.startsWith(v.replace(/\\*.*$/, ''))) disallowed = true;\n    }\n  }\n  const kw = String(keyword || '').toLowerCase().trim();\n  const has = s => kw && String(s || '').toLowerCase().includes(kw);\n  const C = [];\n  const add = (id, label, ok, weight, detail, warn = false) => C.push({ id, label, result: ok ? 'pass' : (warn ? 'warn' : 'fail'), weight, detail });\n  add('status', 'Page returns HTTP 200', status === 200, 10, `HTTP ${status}`);\n  add('https', 'Served over HTTPS', url.startsWith('https://'), 5, url.startsWith('https://') ? 'HTTPS' : 'Not HTTPS');\n  add('indexable', 'Page is indexable (no noindex)', !robots.includes('noindex'), 10, robots || 'no robots meta');\n  add('robots', 'Not blocked by robots.txt', !disallowed, 8, disallowed ? 'Disallowed for all crawlers' : 'Allowed');\n  add('title', 'Title tag 30-60 characters', title.length >= 30 && title.length <= 60, 8, title ? `${title.length} chars` : 'Missing', !!title);\n  add('meta', 'Meta description 70-160 characters', description.length >= 70 && description.length <= 160, 6, description ? `${description.length} chars` : 'Missing', !!description);\n  add('h1', 'Exactly one H1', h1s.length === 1, 6, `${h1s.length} H1 tag(s)`, h1s.length > 1);\n  add('h2', 'Uses H2 subheadings', h2s.length >= 2, 3, `${h2s.length} H2 tag(s)`, h2s.length === 1);\n  add('words', 'At least 300 words of content', words >= 300, 6, `${words} words`, words >= 150);\n  add('alt', 'Images have alt text', noAlt === 0, 4, `${noAlt} of ${imgs.length} image(s) missing alt`, noAlt <= 2);\n  add('canonical', 'Canonical tag present', !!canonical, 5, canonical || 'Missing');\n  add('viewport', 'Mobile viewport tag', viewport, 5, viewport ? 'Present' : 'Missing');\n  add('lang', 'html lang attribute', !!lang, 2, lang || 'Missing');\n  add('og', 'Open Graph title and image', !!meta('og:title') && !!meta('og:image'), 3, meta('og:image') ? 'Present' : 'og:image missing', !!meta('og:title'));\n  add('schema', 'Structured data (JSON-LD)', jsonLd.length > 0, 3, schemaTypes.join(', ') || 'None');\n  add('internal', 'At least 3 internal links', internal.length >= 3, 4, `${internal.length} internal, ${external.length} external`);\n  add('sitemap', 'Sitemap declared in robots.txt', sitemapDeclared, 2, sitemapDeclared ? 'Declared' : (robotsTxt ? 'Not declared' : 'No robots.txt'), true);\n  if (kw) {\n    add('kw_title', 'Keyword in title', has(title), 6, kw);\n    add('kw_h1', 'Keyword in H1', h1s.some(has), 4, kw);\n    add('kw_meta', 'Keyword in meta description', has(description), 3, kw, true);\n    add('kw_intro', 'Keyword in first 100 words', has(text.split(' ').slice(0, 100).join(' ')), 3, kw, true);\n    add('kw_url', 'Keyword words in URL', kw.split(/\\s+/).every(p => path.toLowerCase().includes(p)), 2, path, true);\n  }\n  const total = C.reduce((s, c) => s + c.weight, 0);\n  const got = C.reduce((s, c) => s + (c.result === 'pass' ? c.weight : c.result === 'warn' ? c.weight / 2 : 0), 0);\n  return { url, status, score: Math.round(100 * got / total), title, description, canonical, robots, h1: h1s[0] || '', h1_count: h1s.length,\n    h2s: h2s.slice(0, 12), words, images: imgs.length, images_missing_alt: noAlt, internal_links: internal.length, external_links: external.length,\n    internal_urls: internal.slice(0, 200), lang, schema: schemaTypes, keyword: kw, intro: text.slice(0, 700), checks: C,\n    failed: C.filter(c => c.result !== 'pass').map(c => `${c.result.toUpperCase()}: ${c.label} (${c.detail})`) };\n}\n\nconst page = $('Fetch page HTML').first().json;\nconst robots = $('Fetch robots.txt').first().json;\nconst input = $('Check the URL').first().json;\nconst ctype = String(page.headers?.['content-type'] || '');\nconst status = Number(page.statusCode || 0);\nconst robotsTxt = Number(robots.statusCode) === 200 && !/<html/i.test(String((robots.body ?? robots.data) || '')) ? String((robots.body ?? robots.data) || '') : '';\nconst loaded = status === 200 && /html/i.test(ctype || 'text/html') && String((page.body ?? page.data) || '').length > 200;\nconst s = analyse(page.body ?? page.data, input.url, status, input.keyword, robotsTxt);\nreturn [{ json: { ...s, loaded, error: loaded ? '' : (status ? `The page returned HTTP ${status}${ctype && !/html/i.test(ctype) ? ' (' + ctype + ')' : ''}.` : (page.error?.message || 'The page could not be reached.')) } }];"
+      },
+      "id": "09d98c5f-8e41-51cb-9947-4dd4358463e4",
+      "name": "Extract on-page signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dd7d1811-e596-5cc2-ba43-16e69e06836f",
+              "leftValue": "={{ $json.loaded }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "6e4dc508-d9fc-5f8e-9b1e-5e7bbb8713e9",
+      "name": "Did the page load?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1400,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Fetch the page",
+        "height": 300,
+        "width": 940,
+        "color": 7
+      },
+      "id": "72f653d8-e8da-5a9f-bee4-de21797e34a9",
+      "name": "Section: Fetch the page",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        620,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a senior technical SEO consultant. Write a prioritised action plan for this page using ONLY the data below. Do not invent facts about the business (no prices, locations or claims that are not in the content).\n\nURL: {{ $json.url }}\nTarget keyword: {{ $json.keyword || 'not given (infer the main topic from the content)' }}\nScore: {{ $json.score }}/100\nTitle: {{ $json.title }}\nMeta description: {{ $json.description }}\nH1: {{ $json.h1 }} ({{ $json.h1_count }} H1 tags)\nH2s: {{ $json.h2s.join(' | ') }}\nWord count: {{ $json.words }}\nStructured data: {{ $json.schema.join(', ') || 'none' }}\nFailed or warning checks:\n{{ $json.failed.join('\\n') || 'none' }}\nOpening content: {{ $json.intro }}\n\nRules:\n- top_fixes: 3 to 6 items, most important first, each fix concrete enough to do in under an hour. impact is high, medium or low.\n- suggested_title: 30-60 characters. suggested_meta_description: 120-155 characters. Include the keyword naturally if one is given.\n- content_gaps: up to 5 subtopics a searcher would expect that the page does not cover.\n- summary: max 30 words.",
+        "hasOutputParser": true
+      },
+      "id": "e7ea18da-a522-57e6-894e-f87726e804ac",
+      "name": "Write SEO recommendations",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1700,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "b0b63748-bebd-53a1-837a-49c53cfa80f3",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"summary\": \"Solid technical basics, but the title is too short and the page lacks depth for the target keyword.\",\n  \"top_fixes\": [\n    {\n      \"priority\": 1,\n      \"issue\": \"Title is 18 characters\",\n      \"fix\": \"Rewrite the title to lead with the main keyword and benefit\",\n      \"impact\": \"high\"\n    }\n  ],\n  \"suggested_title\": \"Emergency Plumber in Leeds | 24/7 Call-Outs in 60 Minutes\",\n  \"suggested_meta_description\": \"Burst pipe or no hot water? Our Leeds plumbers arrive within 60 minutes, day or night. Fixed prices, no call-out fee. Call now.\",\n  \"content_gaps\": [\n    \"Pricing section\",\n    \"Service area list\"\n  ]\n}"
+      },
+      "id": "60d782c7-e4f5-54a6-95e3-161c84bbfd66",
+      "name": "Recommendations format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1840,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n// Render the audit as HTML (score, checks table, AI action plan)\nconst s = $('Extract on-page signals').first().json;\nconst ai = $json.output || {};\nconst colour = s.score >= 80 ? '#1a7f37' : s.score >= 60 ? '#b26b00' : '#c62828';\nconst icon = r => r === 'pass' ? '&#10004;' : r === 'warn' ? '&#9888;' : '&#10008;';\nconst rows = s.checks.map(c => `<tr><td>${icon(c.result)}</td><td>${esc(c.label)}</td><td>${esc(c.detail)}</td></tr>`).join('');\nconst fixes = (ai.top_fixes || []).sort((a, b) => a.priority - b.priority)\n  .map(f => `<li><b>${esc(f.issue)}</b> (${esc(f.impact)} impact): ${esc(f.fix)}</li>`).join('');\nconst t = String(ai.suggested_title || ''), d = String(ai.suggested_meta_description || '');\nconst html = `<h2 style=\"color:${colour}\">SEO score: ${s.score}/100</h2><p><a href=\"${esc(s.url)}\">${esc(s.url)}</a></p>\n<p>${esc(ai.summary || '')}</p><h3>Fix these first</h3><ol>${fixes}</ol>\n<h3>Suggested title (${t.length} chars)</h3><p>${esc(t)}</p><h3>Suggested meta description (${d.length} chars)</h3><p>${esc(d)}</p>\n${(ai.content_gaps || []).length ? `<h3>Content gaps</h3><ul>${ai.content_gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : ''}\n<h3>All checks</h3><table style=\"width:100%;border-collapse:collapse;font-size:13px\">${rows}</table>`;\nreturn [{ json: { html, score: s.score, url: s.url } }];"
+      },
+      "id": "fac4d98a-5038-5b43-b28c-1527b4648c63",
+      "name": "Build audit report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2060,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {
+          "formTitle": "Your SEO audit"
+        }
+      },
+      "id": "c8b5412d-1002-5a27-b8fd-68906f9aea12",
+      "name": "Show audit report",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2300,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "=<p>We couldn't audit {{ $json.url }}.</p><p>{{ $json.error }}</p><p>Check the address is public (no login) and try again.</p>",
+        "options": {
+          "formTitle": "Page could not be audited"
+        }
+      },
+      "id": "87dab26b-0c1e-51f0-8543-c33902d34410",
+      "name": "Explain fetch problem",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2300,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "=<p>\"{{ $json.url }}\" doesn't look like a web address. Enter something like https://example.com/page.</p>",
+        "options": {
+          "formTitle": "Check the URL"
+        }
+      },
+      "id": "823dddcd-7be6-55e4-8b46-92dbd155f828",
+      "name": "Explain invalid URL",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2300,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Recommend and report",
+        "height": 780,
+        "width": 820,
+        "color": 7
+      },
+      "id": "a1c6a565-c2b6-5131-a62e-cc5c0576ee3e",
+      "name": "Section: Recommend and report",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "1b489923-c132-55f3-b205-691ee48cf7df",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "ed485442-296e-562b-9cac-cb1e8ba5ccbc",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "2011cca8-b91c-5074-9176-f8d868c91bf8",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write SEO recommendations",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recommendations format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write SEO recommendations",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEO audit form": {
+      "main": [
+        [
+          {
+            "node": "Check the URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check the URL": {
+      "main": [
+        [
+          {
+            "node": "Is the URL valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is the URL valid?": {
+      "main": [
+        [
+          {
+            "node": "Fetch page HTML",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain invalid URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch page HTML": {
+      "main": [
+        [
+          {
+            "node": "Fetch robots.txt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch robots.txt": {
+      "main": [
+        [
+          {
+            "node": "Extract on-page signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract on-page signals": {
+      "main": [
+        [
+          {
+            "node": "Did the page load?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Did the page load?": {
+      "main": [
+        [
+          {
+            "node": "Write SEO recommendations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain fetch problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write SEO recommendations": {
+      "main": [
+        [
+          {
+            "node": "Build audit report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build audit report": {
+      "main": [
+        [
+          {
+            "node": "Show audit report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
