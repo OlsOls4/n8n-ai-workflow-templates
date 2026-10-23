@@ -1,0 +1,1844 @@
+{
+  "name": "Track calories from Telegram meal photos and text with Gemini, daily targets and Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Track calories from Telegram meal photos and text with Gemini, daily targets and Google Sheets\n\nA Telegram food diary that does the maths for you. Send a meal photo or type what you ate, and Gemini estimates calories and macros. Everything is logged to Google Sheets, compared with your own daily targets, and you get a summary every evening.\n\n### How it works\n1. **Parse the message** turns each Telegram message into one of: photo, text meal, or a command (`/goal`, `/today`, `/week`, `/fix`, `/undo`, `/help`).\n2. Photos go to Gemini Vision, text meals (\"2 eggs on toast\") to Gemini text. Both return the same structured JSON. Non-food is rejected and nothing is logged.\n3. Meals are appended to the `Meals` tab. `/fix half portion` re-estimates your last meal and updates its row; `/undo` marks it as undone.\n4. After every action the bot reads your meals and targets and replies with what is left for today. `/week` shows a 7-day table, average and trend.\n5. At 9pm everyone with targets gets a day summary and one practical tip.\n\n### Setup\n1. Add **Telegram** (from @BotFather), **Google Gemini (PaLM) API** (free key at aistudio.google.com) and **Google Sheets** credentials.\n2. Create a sheet with a `Meals` tab: `meal_id, date, time, user_id, user_name, dish, portion, calories_kcal, protein_g, carbs_g, fat_g, confidence, source, status, notes` and a `Targets` tab: `user_id, chat_id, user_name, kcal, protein_g, carbs_g, fat_g, evening_summary`.\n3. Put the Sheet ID in **Config** and **Config (Every evening at 9pm)**.\n4. Set the workflow timezone, activate, then send `/goal 2000 150 200 70` to your bot.\n\n### Customization\n- Change the summary time in **Every evening at 9pm**.\n- Set `evening_summary` to `no` in Targets to mute a user.",
+        "height": 1180,
+        "width": 580
+      },
+      "id": "772e73f5-ef82-5d82-bd3b-f12f65d5f1d2",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -780,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "d4965891-4359-5e59-9392-dff31bc20af5",
+      "name": "Receive Telegram message",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        -100,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "0994b022-b1a2-5f6e-af7e-9dd140fe3e42"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Classify the message: photo, text meal or a command. Dates use the workflow timezone.\nconst m = $json.message || {};\nconst text = String(m.text || m.caption || '').trim();\nconst cmd = (text.match(/^\\/(\\w+)(@\\w+)?/) || [])[1]?.toLowerCase() || '';\nconst arg = cmd ? text.replace(/^\\/\\w+(@\\w+)?\\s*/, '') : text;\nlet kind = 'help', error = '';\nif (m.photo) kind = 'photo';\nelse if (['today', 'week', 'undo'].includes(cmd)) kind = cmd;\nelse if (cmd === 'fix') { kind = arg ? 'fix' : 'help'; if (!arg) error = 'Tell me what to change, e.g. /fix it was half a portion'; }\nelse if (cmd === 'goal') {\n  const n = (arg.match(/\\d+(\\.\\d+)?/g) || []).map(Number);\n  if (n.length && n[0] >= 800 && n[0] <= 6000) kind = 'goal';\n  else error = 'Use /goal kcal protein carbs fat, e.g. /goal 2000 150 200 70 (macros optional)';\n  var goal = { kcal: n[0] || 0, protein_g: n[1] || '', carbs_g: n[2] || '', fat_g: n[3] || '' };\n}\nelse if (cmd) kind = 'help';\nelse if (text) kind = 'text';\nconst when = DateTime.fromSeconds(m.date || Math.floor(Date.now() / 1000));\nreturn [{ json: {\n  kind, arg, error, goal: goal || null,\n  chat_id: m.chat?.id, user_id: String(m.from?.id ?? ''), user_name: m.from?.first_name || '',\n  message_id: m.message_id, date: when.toFormat('yyyy-MM-dd'), time: when.toFormat('HH:mm'),\n} }];"
+      },
+      "id": "093f00f5-aa29-5b20-ab86-242bd38ac101",
+      "name": "Parse message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "6874633e-a35e-5e8b-a3f5-0ae19d0cb9f5",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "photo",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "photo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "01be1a4e-b8d7-558d-a34b-e0ac5aa15b7e",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "text",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text meal"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "592ad679-52ae-5af2-8426-c510c6d5a2b8",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "undo",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "undo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "738b2051-d44f-5333-94e5-783a75d3718b",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "fix",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "fix"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "23595697-2205-5c87-8a4c-9d81a360d799",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "today",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "today"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "748b2dd5-33da-584c-8874-147a61fadb25",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "week",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "week"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "45d87ad3-a252-5768-ac25-1392b55036ec",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "goal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "goal"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "other"
+        },
+        "looseTypeValidation": true
+      },
+      "id": "3c5a3af5-cb5c-5d29-8500-8d16a8658150",
+      "name": "Route by message type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        820,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Receive and route the message",
+        "height": 300,
+        "width": 1140,
+        "color": 7
+      },
+      "id": "932db8b3-4670-5c30-9dd0-9c584354ad41",
+      "name": "Section: Receive and route the message",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $('Receive Telegram message').first().json.message.photo.last().file_id }}",
+        "additionalFields": {}
+      },
+      "id": "f847bc76-54fe-5e85-898c-1701ac3b94f0",
+      "name": "Download photo from Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        -120
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a careful nutrition assistant. Look at the meal in the photo and estimate what it is and its nutrition for the portion shown.\n\nUser caption (may be empty; use it as a hint for the dish or portion size): {{ $('Parse message').first().json.arg || 'none' }}\n\nRules:\n- Estimate the whole portion eaten, not per 100 g.\n- Use realistic values for a typical home or restaurant serving.\n- If it is not food or drink, set is_food to false and use 0 for every number.\n- confidence is one of: low, medium, high.\n- Keep notes under 20 words and mention the main assumption you made.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary",
+              "binaryImageDataKey": "data"
+            }
+          ]
+        }
+      },
+      "id": "2283d3e1-f43f-5476-8cab-8283d3416e39",
+      "name": "Estimate meal from photo",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1340,
+        -120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.8-flash",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "753ecbbb-aac2-5a41-8be8-c3d07a02982a",
+      "name": "Gemini 3.8 Flash (vision)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1340,
+        100
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"is_food\": true,\n  \"dish\": \"Spaghetti bolognese with parmesan\",\n  \"portion\": \"1 large plate\",\n  \"calories_kcal\": 650,\n  \"protein_g\": 30,\n  \"carbs_g\": 85,\n  \"fat_g\": 20,\n  \"confidence\": \"medium\",\n  \"notes\": \"Assumed beef mince and about 120 g dry pasta.\"\n}"
+      },
+      "id": "9db67b6b-58d9-57c2-af7e-96d572bd4e14",
+      "name": "Photo nutrition JSON",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1480,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a careful nutrition assistant. Estimate the nutrition of a meal from the user's words.\n\n{{ $json.previous ? 'Your earlier estimate for their last meal was: ' + JSON.stringify($json.previous) + '\\nThe user corrects it: \"' + $json.arg + '\"\\nReturn the full corrected estimate for that meal (all fields, not just the change).' : 'The user ate: \"' + $json.arg + '\"' }}\n\nRules:\n- Estimate the whole portion eaten, not per 100 g.\n- Use realistic values for a typical home or restaurant serving.\n- If it is not food or drink, set is_food to false and use 0 for every number.\n- confidence is one of: low, medium, high.\n- Keep notes under 20 words and mention the main assumption you made.\n- Words like \"half\", \"large\" or a weight in grams change the portion: scale the numbers.",
+        "hasOutputParser": true
+      },
+      "id": "34b47285-8232-5e7b-a0fd-4da347f0e328",
+      "name": "Estimate meal from text",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1340,
+        320
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "f5fd1fee-f4e1-5adc-ad52-08c39dedd90d",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1340,
+        540
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"is_food\": true,\n  \"dish\": \"Spaghetti bolognese with parmesan\",\n  \"portion\": \"1 large plate\",\n  \"calories_kcal\": 650,\n  \"protein_g\": 30,\n  \"carbs_g\": 85,\n  \"fat_g\": 20,\n  \"confidence\": \"medium\",\n  \"notes\": \"Assumed beef mince and about 120 g dry pasta.\"\n}"
+      },
+      "id": "b2df573b-a10f-55bf-9cd3-201aee7bc2a3",
+      "name": "Text nutrition JSON",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1480,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "12a53e08-4286-5693-91fb-64e905fe94a3",
+              "leftValue": "={{ $json.output.is_food }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f0b6315d-617f-52c0-877c-65c8aa57d56a",
+      "name": "Is it food?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Estimate calories and macros with Gemini",
+        "height": 940,
+        "width": 800,
+        "color": 7
+      },
+      "id": "4e11b8d5-048b-5b92-a69b-d79101521bd7",
+      "name": "Section: Estimate calories and macros with Gemini",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Meals"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "user_id",
+              "lookupValue": "={{ $json.user_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "47d7285a-4f6e-55bd-bce2-e295ff82912f",
+      "name": "Read my meals for lookup",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        580,
+        960
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Find this user's most recent meal that is not undone (for /undo and /fix)\nconst p = $('Parse message').first().json;\nconst rows = $input.all().map(i => i.json)\n  .filter(r => r.meal_id && String(r.user_id) === p.user_id && r.status !== 'undone')\n  .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`) || (a.row_number || 0) - (b.row_number || 0));\nconst last = rows[rows.length - 1];\nif (!last) return [{ json: { ...p, found: false } }];\nconst previous = { dish: last.dish, portion: last.portion, calories_kcal: Number(last.calories_kcal),\n  protein_g: Number(last.protein_g), carbs_g: Number(last.carbs_g), fat_g: Number(last.fat_g), notes: last.notes };\nreturn [{ json: { ...p, found: true, meal_id: last.meal_id, meal_date: last.date, meal_time: last.time,\n  source: last.source || 'text', previous } }];"
+      },
+      "id": "2bedb919-60e0-57b4-8b6d-ae5354d722bf",
+      "name": "Find my last meal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "422d2d98-c7a7-5d76-aacf-7340a95a9b18",
+                    "leftValue": "={{ $json.found }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  },
+                  {
+                    "id": "592ad679-52ae-5af2-8426-c510c6d5a2b8",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "undo",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "undo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "422d2d98-c7a7-5d76-aacf-7340a95a9b18",
+                    "leftValue": "={{ $json.found }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  },
+                  {
+                    "id": "738b2051-d44f-5333-94e5-783a75d3718b",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "fix",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "fix"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "nothing logged"
+        },
+        "looseTypeValidation": true
+      },
+      "id": "ac19b884-3d08-5764-ab31-d05ade91b2ac",
+      "name": "Undo, fix or nothing to change?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1060,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "48c5999e-1eac-5149-9687-18f6faf1ec12",
+              "name": "meal_id",
+              "value": "={{ $json.meal_id }}",
+              "type": "string"
+            },
+            {
+              "id": "136a1c64-5244-52da-9dc8-ae0c668545af",
+              "name": "status",
+              "value": "undone",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cb4a1ee3-bcc3-5566-9fa2-2605b0d02cb2",
+      "name": "Set status to undone",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1320,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Meals"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "meal_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "a508f879-aefb-530e-835d-4d60ad798876",
+      "name": "Mark meal as undone",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1560,
+        880
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parse message').first().json.chat_id }}",
+        "text": "There is no logged meal to change yet. Send a photo or type what you ate first.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "319e4f24-5640-5289-b0bc-9c4289e02fb5",
+      "name": "Reply that there is nothing to change",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        1100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Find the last meal for /undo and /fix",
+        "height": 520,
+        "width": 1200,
+        "color": 7
+      },
+      "id": "6edf07a3-bc6e-550f-95cd-022910dcadac",
+      "name": "Section: Find the last meal for /undo and /fix",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b30fa2be-fc6a-5597-b7d0-eb7f71e4e8b0",
+              "name": "user_id",
+              "value": "={{ $json.user_id }}",
+              "type": "string"
+            },
+            {
+              "id": "138803ff-9517-5909-80d5-b8b4128a115a",
+              "name": "chat_id",
+              "value": "={{ $json.chat_id }}",
+              "type": "string"
+            },
+            {
+              "id": "dd1f393c-1ee6-50b7-9874-1f154fed4f03",
+              "name": "user_name",
+              "value": "={{ $json.user_name }}",
+              "type": "string"
+            },
+            {
+              "id": "347022c3-09b8-5b0a-b3da-47d29763d03b",
+              "name": "kcal",
+              "value": "={{ $json.goal.kcal }}",
+              "type": "number"
+            },
+            {
+              "id": "37cac12a-96fb-5d47-b1c7-36b16e320f5f",
+              "name": "protein_g",
+              "value": "={{ $json.goal.protein_g }}",
+              "type": "string"
+            },
+            {
+              "id": "b3c4c790-f26f-558c-a815-a2b764e6a6aa",
+              "name": "carbs_g",
+              "value": "={{ $json.goal.carbs_g }}",
+              "type": "string"
+            },
+            {
+              "id": "a148047f-9357-588c-8f1c-a883f6e8a14e",
+              "name": "fat_g",
+              "value": "={{ $json.goal.fat_g }}",
+              "type": "string"
+            },
+            {
+              "id": "ec471789-a383-5012-a019-2015e413f020",
+              "name": "evening_summary",
+              "value": "yes",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "83686bf7-8518-5e30-8a46-3dc5107cc0df",
+      "name": "Prepare targets row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        580,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Targets"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "user_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "359d3e0e-3b22-5a1f-b284-b32eed976ed0",
+      "name": "Save daily targets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        820,
+        1440
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.error ? '⚠️ ' + $json.error + '\\n\\n' : '' }}Send a <b>photo</b> of your meal or <b>type what you ate</b> (\"2 eggs on toast\").\n\n/goal 2000 150 200 70 - daily kcal, protein, carbs, fat\n/today - what's left today\n/week - last 7 days\n/fix half portion - correct your last meal\n/undo - remove your last meal",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "2cd568e5-1012-5b08-826f-43bc38537700",
+      "name": "Send help message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1060,
+        1440
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Save targets and help",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "5ec5c2f1-e176-52b1-9be3-dbab54d94501",
+      "name": "Section: Save targets and help",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the sheet row. A /fix keeps the original meal_id, date and time so the row is updated in place.\nconst p = $('Parse message').first().json;\nconst o = $json.output;\nlet last = null;\ntry { last = $('Find my last meal').first().json; } catch (e) { last = null; }\nconst isFix = p.kind === 'fix' && last && last.found;\nconst num = v => Math.round(Number(v) || 0);\nreturn [{ json: {\n  meal_id: isFix ? last.meal_id : `${p.user_id}-${p.message_id}`,\n  date: isFix ? last.meal_date : p.date, time: isFix ? last.meal_time : p.time,\n  user_id: p.user_id, user_name: p.user_name,\n  dish: o.dish, portion: o.portion, calories_kcal: num(o.calories_kcal), protein_g: num(o.protein_g),\n  carbs_g: num(o.carbs_g), fat_g: num(o.fat_g), confidence: o.confidence,\n  source: isFix ? last.source : (p.kind === 'photo' ? 'photo' : 'text'),\n  status: isFix ? 'corrected' : 'logged', notes: o.notes || '',\n} }];"
+      },
+      "id": "9d77a583-f869-5ed1-9b0b-9b4a85279f75",
+      "name": "Prepare log row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8769129f-84bc-56f9-bc26-40bb74508ecc",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "corrected",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "dc2808b4-6c55-5043-93fc-e96f277518d4",
+      "name": "New meal or correction?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2160,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Meals"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "meal_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "3c39897c-da09-55bc-973e-7e91f82bc175",
+      "name": "Update corrected meal",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2400,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Meals"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "f7ad7f2f-7b3f-5a1d-92b9-006882678271",
+      "name": "Append meal to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2400,
+        220
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parse message').first().json.chat_id }}",
+        "text": "=I couldn't find any food or drink in that, so nothing was logged. {{ $json.output.notes }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ea5e7f9a-4b77-53bd-876a-50c62c76e68c",
+      "name": "Reply that no food was found",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1920,
+        340
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 5. Log or correct the meal",
+        "height": 640,
+        "width": 700,
+        "color": 7
+      },
+      "id": "8ff1a0e5-170c-5422-a67b-6f3e97c0034b",
+      "name": "Section: Log or correct the meal",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1860,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Meals"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "user_id",
+              "lookupValue": "={{ $('Parse message').first().json.user_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "907b1de6-45f8-53f2-89a5-346cbc529cd9",
+      "name": "Read my meals",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2700,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Targets"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "user_id",
+              "lookupValue": "={{ $('Parse message').first().json.user_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "008b42f0-67ab-5107-af33-a6b9199167fd",
+      "name": "Read my targets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2940,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reply for every action: what was logged/changed, then today vs targets, or a 7-day view for /week\nconst p = $('Parse message').first().json;\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst n = v => Math.round(Number(v) || 0);\nconst rows = $('Read my meals').all().map(i => i.json)\n  .filter(r => r.meal_id && String(r.user_id) === p.user_id && r.status !== 'undone');\nconst t = $('Read my targets').all().map(i => i.json).find(r => String(r.user_id) === p.user_id) || {};\nconst sum = (list, k) => n(list.reduce((a, r) => a + (Number(r[k]) || 0), 0));\nconst day = d => rows.filter(r => String(r.date) === d);\nlet head = '';\nif (['photo', 'text', 'fix'].includes(p.kind)) {\n  const m = $('Prepare log row').first().json;\n  head = `${p.kind === 'fix' ? '✏️ Updated' : '🍽'} <b>${esc(m.dish)}</b> (${esc(m.portion)})\\n` +\n    `≈ ${m.calories_kcal} kcal · P ${m.protein_g} g · C ${m.carbs_g} g · F ${m.fat_g} g\\n` +\n    `Confidence: ${esc(m.confidence)}. ${esc(m.notes)}\\n\\n`;\n} else if (p.kind === 'undo') {\n  head = `↩️ Removed <b>${esc($('Find my last meal').first().json.previous.dish)}</b> from your log.\\n\\n`;\n} else if (p.kind === 'goal') {\n  head = `🎯 Daily targets saved: ${n(p.goal.kcal)} kcal` +\n    (p.goal.protein_g ? ` · P ${p.goal.protein_g} g · C ${p.goal.carbs_g || '-'} g · F ${p.goal.fat_g || '-'} g` : '') +\n    `. You'll get a summary at 9pm.\\n\\n`;\n}\nlet body;\nif (p.kind === 'week') {\n  const days = [...Array(7)].map((_, i) => DateTime.fromISO(p.date).minus({ days: 6 - i }).toFormat('yyyy-MM-dd'));\n  const prev = [...Array(7)].map((_, i) => DateTime.fromISO(p.date).minus({ days: 13 - i }).toFormat('yyyy-MM-dd'));\n  const kc = days.map(d => sum(day(d), 'calories_kcal'));\n  const logged = kc.filter(k => k > 0);\n  const avg = logged.length ? n(logged.reduce((a, b) => a + b, 0) / logged.length) : 0;\n  const pk = prev.map(d => sum(day(d), 'calories_kcal')).filter(k => k > 0);\n  const pavg = pk.length ? n(pk.reduce((a, b) => a + b, 0) / pk.length) : 0;\n  const goal = n(t.kcal);\n  const lines = days.map((d, i) => {\n    const flag = !kc[i] ? '·' : goal ? (kc[i] > goal * 1.1 ? '🔺' : kc[i] < goal * 0.8 ? '🔻' : '✅') : '';\n    return `${DateTime.fromISO(d).toFormat('ccc dd')}  ${String(kc[i]).padStart(5)} kcal ${flag}`;\n  });\n  body = `<b>Last 7 days</b>\\n<pre>${lines.join('\\n')}</pre>\\nAverage on logged days: <b>${avg} kcal</b>` +\n    (goal ? ` (target ${goal})` : '') + `\\nDays logged: ${logged.length}/7` +\n    (pavg ? `\\nTrend vs previous 7 days: ${avg >= pavg ? '+' : ''}${avg - pavg} kcal/day` : '') +\n    `\\nAvg protein: ${logged.length ? n(days.reduce((a, d) => a + sum(day(d), 'protein_g'), 0) / logged.length) : 0} g`;\n} else {\n  const today = day(p.date);\n  const line = (label, k, tk, unit) => {\n    const got = sum(today, k), goal = n(t[tk]);\n    if (!goal) return `${label}: ${got} ${unit}`;\n    const left = goal - got;\n    return `${label}: ${got} / ${goal} ${unit} (${left >= 0 ? left + ' left' : -left + ' over'})`;\n  };\n  body = `<b>Today</b> (${today.length} meal${today.length === 1 ? '' : 's'})\\n` +\n    [line('Calories', 'calories_kcal', 'kcal', 'kcal'), line('Protein', 'protein_g', 'protein_g', 'g'),\n     line('Carbs', 'carbs_g', 'carbs_g', 'g'), line('Fat', 'fat_g', 'fat_g', 'g')].join('\\n') +\n    (t.kcal ? '' : '\\n\\nSet daily targets with /goal 2000 150 200 70');\n}\nreturn [{ json: { chat_id: p.chat_id, text: head + body } }];"
+      },
+      "id": "b9005b24-699c-5551-b515-bf2624cfb3ec",
+      "name": "Build progress reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3180,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Parse message').first().json.message_id }}"
+        }
+      },
+      "id": "7425e5ce-0505-59ea-bff8-8de91ef97cb3",
+      "name": "Send reply on Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3420,
+        100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 6. Reply with today's progress or the week",
+        "height": 300,
+        "width": 940,
+        "color": 7
+      },
+      "id": "e48bea65-c3f5-5821-9903-33caed7f5bc2",
+      "name": "Section: Reply with today's progress or the week",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 21
+            }
+          ]
+        }
+      },
+      "id": "189ce786-24c3-545e-b112-8370173b0e18",
+      "name": "Every evening at 9pm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        1800
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config (Every evening at 9pm)').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Targets"
+        },
+        "options": {}
+      },
+      "id": "e22c6e02-6f38-5f5b-85a4-c714f4a21f55",
+      "name": "Read everyone's targets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        580,
+        1800
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config (Every evening at 9pm)').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Meals"
+        },
+        "options": {}
+      },
+      "id": "48c4d136-e431-5792-995a-4c18cc95f27f",
+      "name": "Read all meals",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        820,
+        1800
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// One summary per user in Targets (skips evening_summary = no): today vs target and the 7-day average\nconst n = v => Math.round(Number(v) || 0);\nconst today = DateTime.now().toFormat('yyyy-MM-dd');\nconst week = [...Array(7)].map((_, i) => DateTime.now().minus({ days: i }).toFormat('yyyy-MM-dd'));\nconst meals = $('Read all meals').all().map(i => i.json).filter(r => r.meal_id && r.status !== 'undone');\nconst out = [];\nfor (const t of $('Read everyone\\'s targets').all().map(i => i.json)) {\n  if (!t.user_id || String(t.evening_summary).toLowerCase() === 'no') continue;\n  const mine = meals.filter(r => String(r.user_id) === String(t.user_id));\n  const tm = mine.filter(r => String(r.date) === today);\n  const s = k => n(tm.reduce((a, r) => a + (Number(r[k]) || 0), 0));\n  const daily = week.map(d => n(mine.filter(r => String(r.date) === d).reduce((a, r) => a + (Number(r.calories_kcal) || 0), 0))).filter(k => k > 0);\n  out.push({ json: {\n    chat_id: t.chat_id || t.user_id, user_name: t.user_name || '', meals_today: tm.length,\n    dishes: tm.map(r => r.dish).join('; '),\n    kcal: s('calories_kcal'), protein_g: s('protein_g'), carbs_g: s('carbs_g'), fat_g: s('fat_g'),\n    kcal_target: n(t.kcal), protein_target: n(t.protein_g), carbs_target: n(t.carbs_g), fat_target: n(t.fat_g),\n    avg_7d: daily.length ? n(daily.reduce((a, b) => a + b, 0) / daily.length) : 0, days_logged_7d: daily.length,\n  } });\n}\nreturn out;"
+      },
+      "id": "05adb4a6-e96b-5b5f-a5eb-1db544c0548b",
+      "name": "Build evening summaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        1800
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a friendly, practical nutrition coach. Write ONE short tip (max 30 words, plain text, no markdown) for tomorrow based on today's numbers. Be specific to the gap (e.g. protein short, calories over). Never give medical advice or suggest eating under 1200 kcal. If nothing was logged, encourage logging tomorrow's first meal.\n\nName: {{ $json.user_name }}\nMeals today ({{ $json.meals_today }}): {{ $json.dishes || 'none logged' }}\nCalories: {{ $json.kcal }} of {{ $json.kcal_target }} kcal\nProtein: {{ $json.protein_g }} of {{ $json.protein_target || 'no target' }} g\nCarbs: {{ $json.carbs_g }} of {{ $json.carbs_target || 'no target' }} g\nFat: {{ $json.fat_g }} of {{ $json.fat_target || 'no target' }} g\n7-day average: {{ $json.avg_7d }} kcal over {{ $json.days_logged_7d }} logged days",
+        "batching": {
+          "batchSize": 5,
+          "delayBetweenBatches": 5000
+        }
+      },
+      "id": "ebf5400a-52f8-5aee-b58f-24bb256678de",
+      "name": "Write coaching tip",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1300,
+        1800
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "6f29f4cd-e330-5b9e-a766-d1dd1c1a2bd0",
+      "name": "Gemini 3.5 Flash-Lite (coach)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1300,
+        2020
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Build evening summaries').item.json.chat_id }}",
+        "text": "=🌙 <b>Your day</b>: {{ $('Build evening summaries').item.json.kcal }}{{ $('Build evening summaries').item.json.kcal_target ? ' / ' + $('Build evening summaries').item.json.kcal_target : '' }} kcal from {{ $('Build evening summaries').item.json.meals_today }} meal{{ $('Build evening summaries').item.json.meals_today === 1 ? '' : 's' }}\nP {{ $('Build evening summaries').item.json.protein_g }} g · C {{ $('Build evening summaries').item.json.carbs_g }} g · F {{ $('Build evening summaries').item.json.fat_g }} g\n7-day average: {{ $('Build evening summaries').item.json.avg_7d }} kcal ({{ $('Build evening summaries').item.json.days_logged_7d }}/7 days logged)\n\n💡 {{ $json.text.trim() }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "2b54462f-83ec-580e-8ad0-e616938d0ff8",
+      "name": "Send evening summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1620,
+        1800
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 7. Send the evening summary",
+        "height": 500,
+        "width": 1940,
+        "color": 7
+      },
+      "id": "cf58c15a-f8fb-5281-b3dd-81e50185bc41",
+      "name": "Section: Send the evening summary",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9e6410a4-ce9e-5ebf-a30b-6d19f3a3c1ef",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "2686509d-565e-5b79-af03-7204067e871a",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ae31bab7-1d52-59a7-8a74-6836f95a810a",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "234d5605-3f49-5cfc-a3eb-d8cfd82a8f99",
+      "name": "Config (Every evening at 9pm)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        120,
+        1800
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "0b59ee0d-ddd6-5c6f-af77-4f03480478d2",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Workflow failed\nWorkflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send error alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "id": "741f5358-cdcc-5f0b-b97d-e105465853d8",
+      "position": [
+        140,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put the Telegram chat ID in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "7bd9bfee-d153-5877-907d-952faf9dd323",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        2240
+      ]
+    }
+  ],
+  "connections": {
+    "Parse message": {
+      "main": [
+        [
+          {
+            "node": "Route by message type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by message type": {
+      "main": [
+        [
+          {
+            "node": "Download photo from Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Estimate meal from text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read my meals for lookup",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read my meals for lookup",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read my meals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read my meals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare targets row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send help message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download photo from Telegram": {
+      "main": [
+        [
+          {
+            "node": "Estimate meal from photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.8 Flash (vision)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Estimate meal from photo",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Photo nutrition JSON": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Estimate meal from photo",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Estimate meal from text",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text nutrition JSON": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Estimate meal from text",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estimate meal from photo": {
+      "main": [
+        [
+          {
+            "node": "Is it food?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estimate meal from text": {
+      "main": [
+        [
+          {
+            "node": "Is it food?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is it food?": {
+      "main": [
+        [
+          {
+            "node": "Prepare log row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply that no food was found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read my meals for lookup": {
+      "main": [
+        [
+          {
+            "node": "Find my last meal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find my last meal": {
+      "main": [
+        [
+          {
+            "node": "Undo, fix or nothing to change?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Undo, fix or nothing to change?": {
+      "main": [
+        [
+          {
+            "node": "Set status to undone",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Estimate meal from text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply that there is nothing to change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set status to undone": {
+      "main": [
+        [
+          {
+            "node": "Mark meal as undone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark meal as undone": {
+      "main": [
+        [
+          {
+            "node": "Read my meals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare targets row": {
+      "main": [
+        [
+          {
+            "node": "Save daily targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save daily targets": {
+      "main": [
+        [
+          {
+            "node": "Read my meals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare log row": {
+      "main": [
+        [
+          {
+            "node": "New meal or correction?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New meal or correction?": {
+      "main": [
+        [
+          {
+            "node": "Update corrected meal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append meal to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update corrected meal": {
+      "main": [
+        [
+          {
+            "node": "Read my meals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append meal to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Read my meals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read my meals": {
+      "main": [
+        [
+          {
+            "node": "Read my targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read my targets": {
+      "main": [
+        [
+          {
+            "node": "Build progress reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build progress reply": {
+      "main": [
+        [
+          {
+            "node": "Send reply on Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read everyone's targets": {
+      "main": [
+        [
+          {
+            "node": "Read all meals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read all meals": {
+      "main": [
+        [
+          {
+            "node": "Build evening summaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build evening summaries": {
+      "main": [
+        [
+          {
+            "node": "Write coaching tip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite (coach)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write coaching tip",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write coaching tip": {
+      "main": [
+        [
+          {
+            "node": "Send evening summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Parse message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Telegram message": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (Every evening at 9pm)": {
+      "main": [
+        [
+          {
+            "node": "Read everyone's targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every evening at 9pm": {
+      "main": [
+        [
+          {
+            "node": "Config (Every evening at 9pm)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Send error alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
