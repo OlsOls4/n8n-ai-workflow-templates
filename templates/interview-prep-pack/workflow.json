@@ -1,0 +1,381 @@
+{
+  "name": "Generate interview questions and STAR answer outlines from a job description and your CV with Gemini",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Generate interview questions and STAR answer outlines from a job description and your CV with Gemini\n\nWalk into your next interview prepared. Paste the job description, upload your CV and choose the interview type. Google Gemini predicts ten likely questions, explains why each is asked, and drafts a STAR answer outline using only your real experience. You also get the skills to highlight, how to handle your gaps, and smart questions to ask the interviewer.\n\n### How it works\n1. **Interview details form** collects the role, company, job description, interview type and your CV (PDF).\n2. **Extract text from CV** reads your CV.\n3. **Write interview prep pack** asks Gemini for structured JSON. The prompt forbids inventing employers, numbers or projects.\n4. **Format prep pack** turns it into a clean page that the form shows straight away. Copy it or print it to PDF.\n\n### Setup\n1. Add a free **Google Gemini (PaLM) API** credential with a key from aistudio.google.com.\n2. Activate the workflow and open the form's production URL.\n3. That's it: no spreadsheet or email account needed.\n\n### Customization\n- Change the number or mix of questions in **Write interview prep pack**.\n- Add a field for the interviewer's LinkedIn headline or the team name to make questions more specific.\n- Swap the Gemini model for any other chat model node.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 900,
+        "width": 600
+      },
+      "id": "19f2987a-5e15-5fd4-9097-f4f9e54228ab",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Prepare for your interview",
+        "formDescription": "Paste the job description and upload your CV. Your prep pack appears on the next page.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Job title",
+              "fieldName": "job_title",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Company",
+              "fieldName": "company",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Job description",
+              "fieldName": "job_description",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Interview type",
+              "fieldName": "interview_type",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Phone screen"
+                  },
+                  {
+                    "option": "Hiring manager"
+                  },
+                  {
+                    "option": "Technical"
+                  },
+                  {
+                    "option": "Behavioural"
+                  },
+                  {
+                    "option": "Final round"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Your CV (PDF)",
+              "fieldName": "cv",
+              "fieldType": "file",
+              "requiredField": true,
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf"
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Build my prep pack"
+        }
+      },
+      "id": "26dba146-1150-5fa2-af78-e7d849599b55",
+      "name": "Interview details form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "81a24d75-6702-532f-a580-3889eccae41f"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "cv",
+        "options": {}
+      },
+      "id": "4a427164-1afa-55ec-89f4-03a5fb75987a",
+      "name": "Extract text from CV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        140,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "content": "## 1. Tell it about the interview",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "123341e6-fcbf-51f9-9c39-22177d8dddf3",
+      "name": "Section: Tell it about the interview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an interview coach. Prepare this candidate for a {{ $('Interview details form').first().json.interview_type }} interview.\n\nJob title: {{ $('Interview details form').first().json.job_title }}\nCompany: {{ $('Interview details form').first().json.company }}\nJob description:\n{{ $('Interview details form').first().json.job_description.slice(0, 8000) }}\n\nCandidate CV:\n{{ ($json.text || 'No CV text could be read.').replace(/\\s+/g, ' ').slice(0, 10000) }}\n\nRules:\n- Address the candidate as \"you\". Never assume or mention the candidate's gender, age or other personal traits.\n- role_summary: one or two sentences on what the role needs and how your background fits.\n- likely_questions: 10 questions mixing role-specific, behavioural and motivation questions for a {{ $('Interview details form').first().json.interview_type }} interview.\n- answer_outline: a STAR outline (Situation, Task, Action, Result) built only from the CV. If the CV has no fitting example, say what kind of example to prepare instead. Never invent employers, numbers or projects.\n- skills_to_highlight: 5 items. gaps_and_how_to_address: up to 4. questions_to_ask_them: 5 smart questions about the team, success measures and challenges.",
+        "hasOutputParser": true
+      },
+      "id": "4a9e014a-7053-52e5-9b73-84849d376fcb",
+      "name": "Write interview prep pack",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        440,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "f680ca55-9fbb-57e1-9bcc-7ccfa250ab43",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"role_summary\": \"Mid-level data analyst owning weekly reporting for the sales team.\",\n  \"likely_questions\": [\n    {\n      \"question\": \"Tell me about a dashboard that changed a decision.\",\n      \"why_they_ask\": \"The role owns sales reporting.\",\n      \"answer_outline\": \"Situation: ... Task: ... Action: ... Result: ...\"\n    }\n  ],\n  \"skills_to_highlight\": [\n    \"SQL\",\n    \"Stakeholder communication\"\n  ],\n  \"gaps_and_how_to_address\": [\n    {\n      \"gap\": \"No Looker experience\",\n      \"how_to_address\": \"Mention Power BI and a Looker course\"\n    }\n  ],\n  \"questions_to_ask_them\": [\n    \"How is success measured in the first 90 days?\"\n  ]\n}"
+      },
+      "id": "580301c9-4feb-571c-8a4d-6dbf0213e709",
+      "name": "Prep pack format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        580,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Build the prep pack with AI",
+        "height": 500,
+        "width": 340,
+        "color": 7
+      },
+      "id": "d5ea3b6d-805d-5e9d-b8bb-00261dc1e198",
+      "name": "Section: Build the prep pack with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Render the prep pack as HTML for the form's result page\nconst e = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst o = $json.output; const f = $('Interview details form').first().json;\nconst li = a => (a || []).map(x => `<li>${e(x)}</li>`).join('');\nconst qs = (o.likely_questions || []).map((q, i) => `<p><b>${i + 1}. ${e(q.question)}</b><br><i>Why they ask:</i> ${e(q.why_they_ask)}<br>${e(q.answer_outline).replace(/\\n/g, '<br>')}</p>`).join('');\nconst gaps = (o.gaps_and_how_to_address || []).map(g => `<li><b>${e(g.gap)}</b>: ${e(g.how_to_address)}</li>`).join('');\nconst html = `<h3>${e(f.job_title)} at ${e(f.company)}</h3><p>${e(o.role_summary)}</p><h4>Likely questions</h4>${qs}` +\n  `<h4>Skills to highlight</h4><ul>${li(o.skills_to_highlight)}</ul><h4>Gaps and how to handle them</h4><ul>${gaps}</ul>` +\n  `<h4>Questions to ask them</h4><ul>${li(o.questions_to_ask_them)}</ul>`;\nreturn [{ json: { html } }];"
+      },
+      "id": "26528ecd-0c4a-5aef-81c3-3d193d861780",
+      "name": "Format prep pack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {
+          "formTitle": "Your interview prep pack"
+        }
+      },
+      "id": "37812f05-8b2a-5783-b948-5b573b550bfd",
+      "name": "Show prep pack",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1100,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Show the prep pack",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "113c03bc-e044-55eb-a62a-5bad552da373",
+      "name": "Section: Show the prep pack",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "12b8dac4-f76c-587f-b78c-111e5f452d25",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "6260c37e-62ed-5c59-b38c-c65d635e094b",
+      "position": [
+        140,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "d05894e2-551d-55f0-bc5f-d55fed13674e",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write interview prep pack",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep pack format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write interview prep pack",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interview details form": {
+      "main": [
+        [
+          {
+            "node": "Extract text from CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text from CV": {
+      "main": [
+        [
+          {
+            "node": "Write interview prep pack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write interview prep pack": {
+      "main": [
+        [
+          {
+            "node": "Format prep pack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format prep pack": {
+      "main": [
+        [
+          {
+            "node": "Show prep pack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
