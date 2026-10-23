@@ -1,0 +1,907 @@
+{
+  "name": "Manage Google Calendar and Google Tasks from Telegram text or voice notes with a Gemini agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Manage Google Calendar and Google Tasks from Telegram text or voice notes with a Gemini agent\n\nTalk to your calendar. Send your Telegram bot a message or a voice note like \"What's on tomorrow?\", \"Lunch with Priya Friday 1pm\" or \"Remind me to renew my passport by the 30th\", and a Gemini agent reads and updates Google Calendar and Google Tasks for you, then replies in plain language. Only the Telegram users you allow can use it.\n\n### How it works\n1. **Receive Telegram message** gets each message; **Is this an allowed user?** drops anyone not in your `allowed_user_ids`.\n2. Voice notes are downloaded and transcribed by Gemini; text messages are used as they are.\n3. **Calendar and tasks assistant** (AI Agent) knows today's date in your timezone and can get and create calendar events, list open tasks, add tasks with due dates and complete tasks.\n4. **Remember the conversation** keeps the last 10 messages per chat, so follow-ups like \"move it to 3pm\" work in context.\n5. **Format reply** strips markdown, shows what it heard for voice notes and splits long replies.\n\n### Setup\n1. Create a bot with @BotFather and add a **Telegram** credential.\n2. Add **Google Gemini (PaLM) API** (free key at aistudio.google.com), **Google Calendar** and **Google Tasks** OAuth credentials.\n3. In **Set assistant settings** put your Telegram user ID (message @userinfobot) and timezone.\n4. Activate the workflow and say hi to your bot.\n\n### Customization\n- Change `calendar` in the calendar tools from `primary` to another calendar ID.\n- Add more tools to the agent, such as Gmail or Google Sheets.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 960,
+        "width": 600
+      },
+      "id": "520b1832-bfb8-5129-9227-9bac785aa112",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "3e20acd7-9458-54f2-9480-272062f765f0",
+      "name": "Receive Telegram message",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        -100,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "28670571-8954-5330-920c-705065be235e"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8533c36d-bc88-5fa9-bf4f-e016da41f9b7",
+              "name": "allowed_user_ids",
+              "value": "YOUR_TELEGRAM_USER_ID",
+              "type": "string"
+            },
+            {
+              "id": "9b73489f-1e83-50e3-a0ea-8883e7ed00d1",
+              "name": "timezone",
+              "value": "Europe/London",
+              "type": "string"
+            },
+            {
+              "id": "6163fca5-657d-5e8b-bf25-d801c6d935d4",
+              "name": "default_event_minutes",
+              "value": 30,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {},
+        "includeOtherFields": true
+      },
+      "id": "c0f6106d-d03e-5d17-8b5c-8e889fb1654f",
+      "name": "Set assistant settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "058158a3-9ea6-5b56-a726-eb7c080ddbc7",
+              "leftValue": "={{ $json.allowed_user_ids.split(',').map(s => s.trim()).includes(String($json.message.from.id)) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "ed9624b3-eb6b-5289-ac27-dca9b4446edf",
+      "name": "Is this an allowed user?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "41222e45-875d-59f2-90bf-eff809820c66",
+                    "leftValue": "={{ $json.message.voice?.file_id || $json.message.audio?.file_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "voice"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "33f3a043-3cef-5b86-9dc2-2b06074d69c2",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "other"
+        },
+        "looseTypeValidation": true
+      },
+      "id": "bda46700-0494-57e0-89ba-692f795fbe05",
+      "name": "Voice or text?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        620,
+        -40
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c8b85678-58e9-56b9-bbeb-b3dabf959569",
+      "name": "Ignore unknown sender",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        620,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.message.chat.id }}",
+        "text": "Send me a text or a voice note, for example: <i>What's on tomorrow?</i> or <i>Remind me to pay rent on Friday</i>.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "250efb59-68c4-5678-80c4-3987ebb654ce",
+      "name": "Ask for text or voice",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        860,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 1. Receive and check the message",
+        "height": 540,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "0b30c79f-4f7d-5526-83f6-08fd29f07cd2",
+      "name": "Section: Receive and check the message",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.voice?.file_id || $json.message.audio?.file_id }}",
+        "additionalFields": {}
+      },
+      "id": "560cb70c-2ade-53ed-b596-10937d768152",
+      "name": "Download voice note",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1160,
+        -120
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "models/gemini-3.5-flash-lite"
+        },
+        "inputType": "binary",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "657dd243-ceee-5c65-8963-27be58e925f9",
+      "name": "Transcribe voice note with Gemini",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        -120
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bde6ff0c-771a-5e35-9517-67de8c166ed1",
+              "name": "request",
+              "value": "={{ ($json.content?.parts || []).map(p => p.text).join(' ').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "02778786-7baa-5005-a71e-b207430c8c26",
+              "name": "chat_id",
+              "value": "={{ $('Set assistant settings').first().json.message.chat.id }}",
+              "type": "string"
+            },
+            {
+              "id": "54020eb5-0b9c-5bfb-a85a-12aeea6e5b24",
+              "name": "was_voice",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2bc93b17-4880-5110-8bb5-def4a8387e9e",
+      "name": "Use transcript as request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1640,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a0d99ea6-da85-5556-925b-1891f6a37969",
+              "name": "request",
+              "value": "={{ $json.message.text }}",
+              "type": "string"
+            },
+            {
+              "id": "453aa241-f7c5-59ea-bb0b-84c2f714ed33",
+              "name": "chat_id",
+              "value": "={{ $json.message.chat.id }}",
+              "type": "string"
+            },
+            {
+              "id": "6d0314ef-f75d-5e58-8362-2797f8fb42b3",
+              "name": "was_voice",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d7e2585b-b1cf-5406-a65b-57ebfe2c8a23",
+      "name": "Use message text as request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1640,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Turn voice notes into text",
+        "height": 520,
+        "width": 700,
+        "color": 7
+      },
+      "id": "60bad512-b446-5fdf-a401-399b61eec672",
+      "name": "Section: Turn voice notes into text",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.request }}",
+        "options": {
+          "systemMessage": "=You are a concise personal assistant that manages the user's Google Calendar and Google Tasks through Telegram.\n\nNow: {{ $now.setZone($('Set assistant settings').first().json.timezone).toFormat(\"cccc d LLLL yyyy, HH:mm\") }} ({{ $('Set assistant settings').first().json.timezone }}). Resolve \"today\", \"tomorrow\", \"next Friday\" etc. against this. Use ISO 8601 date-times with the correct UTC offset in every tool call.\n\nRules:\n- Use the tools for every calendar or task question; never guess what is in the calendar.\n- New events default to {{ $('Set assistant settings').first().json.default_event_minutes }} minutes when no end time is given. Repeat back the title, day, start and end after creating one.\n- A task with a deadline gets a due date; a request with a fixed time (\"dentist at 3pm Tuesday\") is an event.\n- A weekday name (\"Friday\") means the next one after today; if today is that weekday, ask whether they mean today or next week.\n- If the request is ambiguous (missing day or time), ask one short question instead of guessing.\n- Reply in plain text, max 8 short lines, times in 24-hour format, no markdown tables.",
+          "maxIterations": 8
+        }
+      },
+      "id": "b99a971d-9bc5-5052-bde0-0eefc01167f4",
+      "name": "Calendar and tasks assistant",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2140,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "5b19d991-759e-5a11-ad1f-61e9eccbb906",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1900,
+        260
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.chat_id }}",
+        "contextWindowLength": 10
+      },
+      "id": "ffcaec09-dfc1-5316-a2e1-378669387959",
+      "name": "Remember the conversation",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        2040,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "primary"
+        },
+        "returnAll": false,
+        "limit": 25,
+        "timeMin": "={{ $fromAI('after', `Start of the time range, ISO 8601 with offset`, 'string') }}",
+        "timeMax": "={{ $fromAI('before', `End of the time range, ISO 8601 with offset`, 'string') }}",
+        "options": {
+          "singleEvents": true,
+          "orderBy": "startTime",
+          "fields": "items(id,summary,start,end,location,description,hangoutLink)"
+        }
+      },
+      "id": "b9499601-55b7-5933-bf1e-43e637de8c4e",
+      "name": "Get calendar events",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        2180,
+        260
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "primary"
+        },
+        "start": "={{ $fromAI('start', `Event start, ISO 8601 with offset`, 'string') }}",
+        "end": "={{ $fromAI('end', `Event end, ISO 8601 with offset`, 'string') }}",
+        "useDefaultReminders": true,
+        "additionalFields": {
+          "summary": "={{ $fromAI('title', `Short event title`, 'string') }}",
+          "location": "={{ $fromAI('location', `Location, or empty string`, 'string') }}",
+          "description": "={{ $fromAI('notes', `Extra details, or empty string`, 'string') }}"
+        }
+      },
+      "id": "d030f7a0-2b07-599c-a8e2-c9c2e4fdda93",
+      "name": "Create calendar event",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        2320,
+        260
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "task": "@default",
+        "returnAll": false,
+        "limit": 50,
+        "additionalFields": {
+          "showCompleted": false
+        }
+      },
+      "id": "02886d95-b73e-50f3-8221-bf403bfb9726",
+      "name": "Get open tasks",
+      "type": "n8n-nodes-base.googleTasksTool",
+      "typeVersion": 1,
+      "position": [
+        2460,
+        260
+      ],
+      "credentials": {
+        "googleTasksOAuth2Api": {
+          "name": "Google Tasks account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "task": "@default",
+        "title": "={{ $fromAI('title', `Task title`, 'string') }}",
+        "additionalFields": {
+          "dueDate": "={{ $fromAI('due', `Due date as ISO 8601, or empty string if none`, 'string') }}",
+          "notes": "={{ $fromAI('notes', `Task notes, or empty string`, 'string') }}"
+        }
+      },
+      "id": "6149b6b9-ff46-5bcf-b5c3-2ed721e27134",
+      "name": "Create task",
+      "type": "n8n-nodes-base.googleTasksTool",
+      "typeVersion": 1,
+      "position": [
+        2600,
+        260
+      ],
+      "credentials": {
+        "googleTasksOAuth2Api": {
+          "name": "Google Tasks account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "task": "@default",
+        "taskId": "={{ $fromAI('task_id', `ID of the task to complete, from Get open tasks`, 'string') }}",
+        "updateFields": {
+          "status": "completed"
+        }
+      },
+      "id": "4663445d-afd5-57d3-88f9-ee611e34b8d4",
+      "name": "Complete task",
+      "type": "n8n-nodes-base.googleTasksTool",
+      "typeVersion": 1,
+      "position": [
+        2740,
+        260
+      ],
+      "credentials": {
+        "googleTasksOAuth2Api": {
+          "name": "Google Tasks account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Let the agent use Calendar and Tasks",
+        "height": 560,
+        "width": 1060,
+        "color": 7
+      },
+      "id": "fbccc4ff-82a3-591c-b33f-9050b9efab86",
+      "name": "Section: Let the agent use Calendar and Tasks",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Plain-text reply, markdown stripped, split under Telegram's 4096 limit. Falls back politely if the agent failed.\nconst req = $('Calendar and tasks assistant').first().json;\nlet text = String(req.output || '').replace(/\\*\\*(.+?)\\*\\*/g, '$1').replace(/^#+\\s*/gm, '').trim();\nif (!text) text = \"Sorry, I couldn't do that just now. Please try again in a minute.\";\nconst heard = $('Use transcript as request').isExecuted ? `🎙 \"${$('Use transcript as request').first().json.request}\"\\n\\n` : '';\ntext = heard + text;\nconst parts = [];\nfor (let i = 0; i < text.length; i += 3900) parts.push(text.slice(i, i + 3900));\nconst chatId = $('Set assistant settings').first().json.message.chat.id;\nreturn parts.map(t => ({ json: { chat_id: chatId, text: t } }));"
+      },
+      "id": "2427bee9-7a56-5014-9219-41b15ba40b5a",
+      "name": "Format reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "df5d9e75-e2ad-5ff4-837b-795e19787bc1",
+      "name": "Send reply on Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3280,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Reply on Telegram",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "c6de8c13-9ad2-541b-8d1b-47bbfb5bc191",
+      "name": "Section: Reply on Telegram",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2980,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "117360fd-8f9d-5b14-8cfe-6169d62e235a",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Workflow failed\nWorkflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send error alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "id": "fd0a8fb8-034e-516e-b21e-e91eb5696b65",
+      "position": [
+        140,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put the Telegram chat ID in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "4f6cd076-891a-5c2a-b913-0a32f208c964",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Receive Telegram message": {
+      "main": [
+        [
+          {
+            "node": "Set assistant settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set assistant settings": {
+      "main": [
+        [
+          {
+            "node": "Is this an allowed user?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is this an allowed user?": {
+      "main": [
+        [
+          {
+            "node": "Voice or text?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignore unknown sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice or text?": {
+      "main": [
+        [
+          {
+            "node": "Download voice note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use message text as request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask for text or voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download voice note": {
+      "main": [
+        [
+          {
+            "node": "Transcribe voice note with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe voice note with Gemini": {
+      "main": [
+        [
+          {
+            "node": "Use transcript as request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember the conversation": {
+      "ai_memory": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get calendar events": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create calendar event": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get open tasks": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create task": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete task": {
+      "ai_tool": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use transcript as request": {
+      "main": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use message text as request": {
+      "main": [
+        [
+          {
+            "node": "Calendar and tasks assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar and tasks assistant": {
+      "main": [
+        [
+          {
+            "node": "Format reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format reply": {
+      "main": [
+        [
+          {
+            "node": "Send reply on Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Send error alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
