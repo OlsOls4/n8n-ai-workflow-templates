@@ -1,0 +1,609 @@
+{
+  "name": "Write podcast show notes, chapters and social posts from new RSS episodes with Gemini and Gmail",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Write podcast show notes, chapters and social posts from new RSS episodes with Gemini and Gmail\n\nPublish an episode and get the whole show-notes pack in your inbox. The workflow watches your podcast's RSS feed, sends each new episode's audio to Gemini for a timestamped transcript, then writes a summary, 120-180 word show notes, key takeaways, YouTube-ready chapters, title ideas, verbatim quotes, an X post, a LinkedIn post, an Instagram caption and a newsletter blurb. Chapters are checked against YouTube's rules before they reach you.\n\n### How it works\n1. Every 6 hours **Read podcast RSS feed** loads your feed; **Pick newest episodes** keeps the newest audio episodes, and episodes handled in earlier runs are skipped.\n2. **Transcribe episode with Gemini** sends the audio URL to Gemini, which returns a transcript with timestamps and speakers. If that fails, the description is used instead and the email says so.\n3. **Write show notes pack** returns structured JSON and is told to use only facts in the transcript.\n4. **Check chapters and build email** enforces a first chapter at 00:00, at least 3 chapters, 10 seconds apart and inside the episode length, and builds a ready-to-paste YouTube description.\n5. The pack is emailed to you and logged in Google Sheets.\n\n### Setup\n1. Add **Google Gemini (PaLM) API** (free key at aistudio.google.com), **Gmail** and **Google Sheets** credentials.\n2. Put your feed URL, show name, hosts and email in **Set podcast settings**.\n3. Create an `Episodes` tab (columns in the README) and put the Sheet ID in **Set podcast settings**.\n4. Activate. The first run processes your latest episode.\n\n### Customization\n- Raise `max_episodes_per_run` to backfill older episodes.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "ef35fb1b-ebfc-5842-8370-2d9914737111",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 15 */6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "5dc4490d-2a42-5c7f-9379-35012f16171c",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b05639e6-90ae-5e9c-a425-0012b9890cfa",
+              "name": "feed_url",
+              "value": "https://feeds.example.com/your-podcast.xml",
+              "type": "string"
+            },
+            {
+              "id": "20b8ee9c-2ba8-5082-97ef-a52be362db40",
+              "name": "show_name",
+              "value": "Your Podcast Name",
+              "type": "string"
+            },
+            {
+              "id": "4c50c976-6933-5f7c-b2b7-4c7926384c52",
+              "name": "host_names",
+              "value": "Host One, Host Two",
+              "type": "string"
+            },
+            {
+              "id": "acd268e4-68f4-5257-b34a-f3cf7c37d06c",
+              "name": "tone",
+              "value": "Warm, clear and practical",
+              "type": "string"
+            },
+            {
+              "id": "f26cc3ee-898f-5b47-a7de-667aa9f60ffd",
+              "name": "email_to",
+              "value": "you@example.com",
+              "type": "string"
+            },
+            {
+              "id": "4bba96a0-927d-5655-9a6e-12c49978987b",
+              "name": "max_episodes_per_run",
+              "value": 1,
+              "type": "number"
+            },
+            {
+              "id": "4347d881-5f2e-5c3c-b93c-8b1e08adbde7",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "908be216-d99f-502a-8016-3e09fb76ffb6",
+      "name": "Set podcast settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.feed_url }}",
+        "options": {
+          "customFields": "itunes:duration,itunes:summary,enclosure"
+        }
+      },
+      "id": "8ac1dcb9-5669-55b2-b40e-dddd4f9d98b9",
+      "name": "Read podcast RSS feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Newest episodes with an audio enclosure, capped per run\nconst s = $('Set podcast settings').first().json;\nconst strip = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\\s+/g, ' ').trim();\nreturn $input.all().map(i => i.json)\n  .filter(e => e.enclosure?.url && (/^audio\\//i.test(e.enclosure.type || '') || (!e.enclosure.type && /\\.(mp3|m4a|aac|ogg|wav)(\\?|$)/i.test(e.enclosure.url))))\n  .sort((a, b) => Date.parse(b.isoDate || b.pubDate) - Date.parse(a.isoDate || a.pubDate))\n  .slice(0, Number(s.max_episodes_per_run) || 1)\n  .map(e => ({ json: { episode_id: e.guid || e.link || e.enclosure.url, title: e.title, show_name: s.show_name,\n    published: e.isoDate ? DateTime.fromISO(e.isoDate).toFormat('d LLL yyyy') : (e.pubDate || ''),\n    duration: e['itunes:duration'] || '', audio_url: e.enclosure.url, audio_bytes: Number(e.enclosure.length) || 0,\n    description: strip(e.content || e.contentSnippet || e['itunes:summary']).slice(0, 3000) } }));"
+      },
+      "id": "74a3c52a-b8c2-5886-8584-f47e8873f00f",
+      "name": "Pick newest episodes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.episode_id }}",
+        "options": {}
+      },
+      "id": "66f02c17-2e4d-561d-a44f-ff1677e57ff6",
+      "name": "Skip episodes already done",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Check the feed for new episodes",
+        "height": 300,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "29fb8acc-2cd8-50fb-a95f-e2c3fbd4cace",
+      "name": "Section: Check the feed for new episodes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "models/gemini-3.5-flash-lite"
+        },
+        "text": "Transcribe this podcast episode in the original language. Start every paragraph with a timestamp in [MM:SS] or [H:MM:SS] format, with a new paragraph at least every 60 seconds and whenever the speaker changes. Prefix paragraphs with the speaker (Host, Guest, or their name if it is said). Output only the transcript.",
+        "inputType": "url",
+        "audioUrls": "={{ $json.audio_url }}",
+        "options": {
+          "maxOutputTokens": 65000
+        }
+      },
+      "id": "e10d0ee9-2846-5b55-a0ee-1a846ccf367b",
+      "name": "Transcribe episode with Gemini",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1160,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Use the Gemini transcript, or fall back to the description when transcription failed\nreturn $input.all().map((item, i) => {\n  const ep = $('Skip episodes already done').itemMatching(i).json;\n  const text = (item.json.content?.parts || []).map(p => p.text || '').join('\\n').trim();\n  const ok = text.length > 500 && !item.json.error;\n  return { json: { ...ep, transcript: ok ? text.slice(0, 400000) : ep.description,\n    transcript_source: ok ? 'audio' : 'description', transcript_chars: text.length } };\n});"
+      },
+      "id": "5dfcf959-3ed8-5ce1-bd5e-5c5c299c78d8",
+      "name": "Prepare transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Transcribe the audio with Gemini",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "e5883fae-0c59-59da-aa0c-579775b21654",
+      "name": "Section: Transcribe the audio with Gemini",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You write show notes for the podcast \"{{ $('Set podcast settings').first().json.show_name }}\" (hosts: {{ $('Set podcast settings').first().json.host_names }}). Tone: {{ $('Set podcast settings').first().json.tone }}.\n\nEpisode title: {{ $json.title }}\nPublished: {{ $json.published }}\nDuration: {{ $json.duration || 'unknown' }}\nPublisher's description: {{ $json.description }}\n\nTranscript{{ $json.transcript_source === 'description' ? ' (NOT available: the audio could not be transcribed, so base everything on the description, return an empty chapters list and empty quotes)' : '' }}:\n{{ $json.transcript }}\n\nRules:\n- Only use facts, names and numbers that appear in the transcript or description. Never invent guests, links or statistics.\n- chapters: 4-10 chapters, first one at 00:00, timestamps copied from the transcript, titles under 7 words.\n- quotes: 2-4 short verbatim lines with their timestamp.\n- show_notes: 120-180 words, main keyword in the first sentence, no emojis.",
+        "hasOutputParser": true
+      },
+      "id": "4da31e1e-478f-5d3c-a3c6-4e4a2ac5fd47",
+      "name": "Write show notes pack",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1700,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.4,
+          "maxOutputTokens": 8192
+        }
+      },
+      "id": "ee3515b2-3c0f-5820-a994-920a690c8d64",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"summary\": \"Two-sentence summary of the episode.\",\n  \"show_notes\": \"A 120-180 word description for podcast apps, keyword in the first sentence.\",\n  \"key_takeaways\": [\n    \"Takeaway one\",\n    \"Takeaway two\",\n    \"Takeaway three\"\n  ],\n  \"chapters\": [\n    {\n      \"start\": \"00:00\",\n      \"title\": \"Intro\"\n    },\n    {\n      \"start\": \"04:30\",\n      \"title\": \"Why most budgets fail\"\n    }\n  ],\n  \"guests\": [\n    \"Guest name, what they do\"\n  ],\n  \"quotes\": [\n    {\n      \"time\": \"12:40\",\n      \"speaker\": \"Guest\",\n      \"text\": \"A short memorable line from the transcript.\"\n    }\n  ],\n  \"title_ideas\": [\n    \"Episode title option 1\",\n    \"Option 2\",\n    \"Option 3\"\n  ],\n  \"social\": {\n    \"x_post\": \"Post under 270 characters\",\n    \"linkedin_post\": \"3-5 short paragraphs\",\n    \"instagram_caption\": \"Caption with 3-5 hashtags\"\n  },\n  \"newsletter_blurb\": \"80-120 words for your newsletter.\"\n}"
+      },
+      "id": "5d46a067-6301-5a46-9b07-3cf957d29a3e",
+      "name": "Show notes JSON format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1840,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate chapters against YouTube's rules (first at 00:00, >= 3 chapters, >= 10 s apart, inside the episode)\nconst toSec = t => String(t || '').split(':').map(Number).reduce((a, n) => a * 60 + (n || 0), 0);\nconst fmt = s => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = Math.floor(s % 60);\n  return (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(x).padStart(2, '0'); };\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nreturn $input.all().map((item, i) => {\n  const ep = $('Prepare transcript').itemMatching(i).json;\n  const o = item.json.output || {};\n  const dur = toSec(ep.duration) || 0;\n  let ch = (o.chapters || []).map(c => ({ s: toSec(c.start), title: String(c.title || '').trim() }))\n    .filter(c => c.title && (!dur || c.s < dur)).sort((a, b) => a.s - b.s);\n  ch = ch.filter((c, k) => k === 0 || c.s - ch[k - 1].s >= 10);\n  if (ch.length && ch[0].s !== 0) ch.unshift({ s: 0, title: 'Intro' });\n  const chaptersOk = ch.length >= 3;\n  const chapterText = chaptersOk ? ch.map(c => `${fmt(c.s)} ${c.title}`).join('\\n') : '';\n  const youtubeDescription = `${o.show_notes || ''}\\n\\n${chapterText ? 'Chapters\\n' + chapterText + '\\n\\n' : ''}${(o.key_takeaways || []).map(t => '• ' + t).join('\\n')}`;\n  const li = a => (a || []).map(x => `<li>${esc(x)}</li>`).join('');\n  const html = `<h2>${esc(ep.title)}</h2><p><i>${esc(ep.show_name)} · ${esc(ep.published)} · ${esc(ep.duration || '')}</i></p>\n<p>${esc(o.summary)}</p>${ep.transcript_source === 'description' ? '<p><b>⚠️ Audio could not be transcribed; notes are based on the episode description only.</b></p>' : ''}\n<h3>Show notes</h3><p>${esc(o.show_notes)}</p><h3>Key takeaways</h3><ul>${li(o.key_takeaways)}</ul>\n<h3>Chapters</h3><pre>${esc(chapterText || 'Not enough reliable timestamps for chapters.')}</pre>\n<h3>Title ideas</h3><ol>${li(o.title_ideas)}</ol>\n<h3>Quotes</h3><ul>${(o.quotes || []).map(q => `<li>[${esc(q.time)}] ${esc(q.speaker)}: \"${esc(q.text)}\"</li>`).join('')}</ul>\n<h3>Social posts</h3><p><b>X:</b> ${esc(o.social?.x_post)}</p><p><b>LinkedIn:</b><br>${esc(o.social?.linkedin_post).replace(/\\n/g, '<br>')}</p><p><b>Instagram:</b><br>${esc(o.social?.instagram_caption)}</p>\n<h3>Newsletter blurb</h3><p>${esc(o.newsletter_blurb)}</p><h3>YouTube description</h3><pre>${esc(youtubeDescription)}</pre>`;\n  return { json: { episode_id: ep.episode_id, title: ep.title, published: ep.published, audio_url: ep.audio_url,\n    transcript_source: ep.transcript_source, chapters: chapterText, chapters_ok: chaptersOk, summary: o.summary || '',\n    show_notes: o.show_notes || '', title_ideas: (o.title_ideas || []).join(' | '), x_post: o.social?.x_post || '',\n    linkedin_post: o.social?.linkedin_post || '', instagram_caption: o.social?.instagram_caption || '',\n    newsletter_blurb: o.newsletter_blurb || '', youtube_description: youtubeDescription, html,\n    quotes: (o.quotes || []).map(q => `[${q.time}] ${q.text}`).join(' | '), processed_at: $now.toFormat('yyyy-MM-dd HH:mm') } };\n});"
+      },
+      "id": "214dbb46-d4fd-5dee-ae2f-a6683739851e",
+      "name": "Check chapters and build email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Write the show notes pack",
+        "height": 500,
+        "width": 520,
+        "color": 7
+      },
+      "id": "23616c31-3807-55cb-b536-8adbc78d537d",
+      "name": "Section: Write the show notes pack",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Set podcast settings').first().json.email_to }}",
+        "subject": "=Show notes ready: {{ $json.title }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "341d7a45-fcf9-5bb1-9b75-249c2dddc7c0",
+      "name": "Email me the show notes",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2300,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Check chapters and build email').all().map(i => { const { html, ...row } = i.json; return { json: row }; });"
+      },
+      "id": "416d42fa-d582-5dd4-8970-0cbc47146453",
+      "name": "Build sheet row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2540,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set podcast settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Episodes"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "9634e8c5-0a4c-595d-9b94-47435d1e010c",
+      "name": "Log episode to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2780,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Email and log the pack",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "97f9fa05-ae4a-59ce-928c-7732974c471c",
+      "name": "Section: Email and log the pack",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "629f94eb-4d18-53a2-a933-f37427721dfc",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "5918ac4a-ff94-510d-994d-e7837f9c6cce",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "b31a32e8-1529-5a13-9148-84e20329c99d",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "node": "Set podcast settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set podcast settings": {
+      "main": [
+        [
+          {
+            "node": "Read podcast RSS feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read podcast RSS feed": {
+      "main": [
+        [
+          {
+            "node": "Pick newest episodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick newest episodes": {
+      "main": [
+        [
+          {
+            "node": "Skip episodes already done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip episodes already done": {
+      "main": [
+        [
+          {
+            "node": "Transcribe episode with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe episode with Gemini": {
+      "main": [
+        [
+          {
+            "node": "Prepare transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write show notes pack",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show notes JSON format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write show notes pack",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare transcript": {
+      "main": [
+        [
+          {
+            "node": "Write show notes pack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write show notes pack": {
+      "main": [
+        [
+          {
+            "node": "Check chapters and build email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check chapters and build email": {
+      "main": [
+        [
+          {
+            "node": "Email me the show notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email me the show notes": {
+      "main": [
+        [
+          {
+            "node": "Build sheet row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build sheet row": {
+      "main": [
+        [
+          {
+            "node": "Log episode to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
