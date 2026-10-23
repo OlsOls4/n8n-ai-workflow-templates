@@ -1,0 +1,620 @@
+{
+  "name": "Categorise bank statement CSV transactions into bookkeeping categories with Gemini and Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Categorise bank statement CSV transactions into bookkeeping categories with Gemini and Google Sheets\n\nUpload a CSV export from any business bank account and get every transaction sorted into a bookkeeping category, saved to Google Sheets, with a summary of income, spending and top suppliers. Built for small business owners, freelancers and bookkeepers who still sort statements by hand.\n\n### How it works\n1. **Bank statement upload form** takes the CSV, currency and date format.\n2. **Normalise transactions** finds the date, description and amount columns (single amount or paid in / paid out), parses dates and amounts, cleans merchant names and gives each row a stable ID.\n3. Unique merchants are sent to Gemini in batches of 40, so 500 rows cost only a few AI calls.\n4. Categories are mapped back to every row. Low-confidence results and sign mismatches (money in labelled as an expense) are flagged `needs_review`.\n5. Rows are upserted into Google Sheets by ID, so uploading the same statement twice never duplicates anything. The form shows a summary.\n\n### Setup\n1. Add a **Google Gemini (PaLM) API** credential (free key from aistudio.google.com).\n2. Create a Google Sheet with a `Transactions` tab and the header row listed in **Save to Transactions sheet**'s note.\n3. Put the Sheet ID in **Config** and connect **Google Sheets**.\n4. Activate and open the form's production URL.\n\n### Customization\n- Edit the category list in **Categorise merchants with AI**.\n- Change the review threshold (0.7) in **Apply categories to transactions**.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "1e48b4b5-e393-53b5-a7aa-6092237602ff",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Categorise a bank statement",
+        "formDescription": "Upload a CSV export from your business bank account. Each transaction is sorted into a bookkeeping category and saved to Google Sheets.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Bank statement (CSV)",
+              "fieldName": "statement",
+              "fieldType": "file",
+              "requiredField": true,
+              "multipleFiles": false,
+              "acceptFileTypes": ".csv"
+            },
+            {
+              "fieldLabel": "Currency",
+              "fieldName": "currency",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "GBP"
+                  },
+                  {
+                    "option": "USD"
+                  },
+                  {
+                    "option": "EUR"
+                  },
+                  {
+                    "option": "AUD"
+                  },
+                  {
+                    "option": "CAD"
+                  },
+                  {
+                    "option": "NZD"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Date format in the file",
+              "fieldName": "date_format",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Day first (31/01/2026)"
+                  },
+                  {
+                    "option": "Month first (01/31/2026)"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "What does the business do?",
+              "fieldName": "business",
+              "fieldType": "text",
+              "placeholder": "e.g. web design agency with 3 staff"
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Categorise"
+        }
+      },
+      "id": "bd34bed1-4926-5b82-9a06-9109c8060299",
+      "name": "Bank statement upload form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "70552fb2-ff3b-5278-a9fd-1c28ec91423a"
+    },
+    {
+      "parameters": {
+        "operation": "csv",
+        "binaryPropertyName": "statement",
+        "options": {}
+      },
+      "id": "06f469da-db09-55c2-9440-18fce1d24504",
+      "name": "Read CSV rows",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        360,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn any bank CSV export into clean transactions (date, description, merchant, amount)\nconst form = $('Bank statement upload form').first().json;\nconst dayFirst = !String(form.date_format || '').startsWith('Month');\nconst rows = $input.all().map(i => i.json).filter(r => r && Object.keys(r).length && !r.error);\nconst keys = [...new Set(rows.flatMap(r => Object.keys(r)))]; // CSV readers drop empty cells, so collect headers from every row\nconst find = (...pats) => keys.find(k => pats.some(p => p.test(k.trim())));\nconst kDate = find(/^(transaction |posting |value )?date$/i, /date/i, /posted/i);\nconst kDesc = find(/desc/i, /narrative/i, /details/i, /memo/i, /payee/i, /merchant/i, /^name$/i, /reference/i);\nconst kAmt = find(/^amount/i, /amount/i, /^value$/i);\nconst kOut = find(/debit/i, /paid out/i, /money out/i, /withdraw/i, /^out$/i);\nconst kIn = find(/credit/i, /paid in/i, /money in/i, /deposit/i, /^in$/i);\nconst num = v => {\n  if (v === undefined || v === null || String(v).trim() === '') return null;\n  let s = String(v).trim();\n  const neg = /^\\(.*\\)$/.test(s) || /^-/.test(s) || /-$/.test(s) || /\\bDR$/i.test(s);\n  s = s.replace(/[^0-9.,]/g, '');\n  if (/,\\d{1,2}$/.test(s) && !/\\.\\d{1,2}$/.test(s)) s = s.replace(/\\./g, '').replace(',', '.'); else s = s.replace(/,/g, '');\n  const n = parseFloat(s);\n  return isNaN(n) ? null : (neg ? -Math.abs(n) : n);\n};\nconst pad = n => String(n).padStart(2, '0');\nconst toIso = v => {\n  const s = String(v ?? '').trim(); let m;\n  if ((m = s.match(/^(\\d{4})[-\\/.](\\d{1,2})[-\\/.](\\d{1,2})/))) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;\n  if ((m = s.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{2,4})/))) {\n    const y = m[3].length === 2 ? '20' + m[3] : m[3];\n    const d = dayFirst ? m[1] : m[2], mo = dayFirst ? m[2] : m[1];\n    return `${y}-${pad(mo)}-${pad(d)}`;\n  }\n  const d = new Date(s); return isNaN(d) ? '' : d.toISOString().slice(0, 10);\n};\nconst clean = d => String(d ?? '').toUpperCase()\n  .replace(/\\d{1,2}[\\/.\\-]\\d{1,2}([\\/.\\-]\\d{2,4})?/g, ' ')\n  .replace(/\\b(CARD PAYMENT|CARD|VISA|MASTERCARD|DEBIT|CREDIT|POS|PAYMENT TO|PAYMENT FROM|PAYMENT|PURCHASE|CONTACTLESS|DIRECT DEBIT|STANDING ORDER|DD|SO|FPI|FPO|BGC|TFR|BACS|REF|ON|TO|FROM)\\b/g, ' ')\n  .replace(/\\*\\S*/g, ' ').replace(/#\\S*/g, ' ').replace(/\\b[A-Z]*\\d[A-Z\\d]{3,}\\b/g, ' ')\n  .replace(/[^A-Z&' .-]/g, ' ').replace(/\\s+/g, ' ').trim().replace(/(\\s+[A-Z]{1,4})?[\\s.-]+$/, '').slice(0, 40) || 'UNKNOWN';\nconst hash = s => { let h = 5381; for (const c of s) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return h.toString(36); };\nif (!kDate || !kDesc || (!kAmt && !kOut && !kIn)) {\n  return [{ json: { ok: false, reason: `Could not find date, description and amount columns. Columns found: ${keys.join(', ') || 'none'}` } }];\n}\nconst seen = {};\nconst out = [];\nrows.forEach((r, i) => {\n  let amount = kAmt ? num(r[kAmt]) : null;\n  if (amount === null) {\n    const o = kOut ? num(r[kOut]) : null, n = kIn ? num(r[kIn]) : null;\n    if (o) amount = -Math.abs(o); else if (n) amount = Math.abs(n);\n  }\n  const date = toIso(r[kDate]);\n  const description = String(r[kDesc] ?? '').trim();\n  if (amount === null || amount === 0 || !date || !description) return;\n  let id = hash(`${date}|${amount.toFixed(2)}|${description}`);\n  seen[id] = (seen[id] || 0) + 1;\n  if (seen[id] > 1) id += '-' + seen[id];\n  out.push({ json: { ok: true, txn_id: id, date, description, merchant: clean(description),\n    amount: Math.round(amount * 100) / 100, direction: amount < 0 ? 'out' : 'in', currency: form.currency || 'GBP', source_row: i + 2 } });\n});\nif (!out.length) return [{ json: { ok: false, reason: 'The file had the right columns but no rows with a valid date and a non-zero amount.' } }];\nreturn out;"
+      },
+      "id": "234c9b81-6f1c-5f20-bd83-a4dce5c10b77",
+      "name": "Normalise transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "03d8d449-7a34-5e01-a3e4-4bb3f295271a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "cfc07bee-064b-53af-a6f2-a60b4798f293",
+      "name": "Were transactions found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Upload and clean the statement",
+        "height": 300,
+        "width": 1160,
+        "color": 7
+      },
+      "id": "3b8ac743-7856-5e67-b03f-efa237350f76",
+      "name": "Section: Upload and clean the statement",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One line per unique merchant, 40 merchants per AI call (keeps free-tier usage low)\nconst txns = $input.all().map(i => i.json);\nconst by = {};\nfor (const t of txns) {\n  const m = by[t.merchant] || (by[t.merchant] = { merchant: t.merchant, count: 0, total: 0, ins: 0, sample: t.description });\n  m.count++; m.total += t.amount; if (t.amount > 0) m.ins++;\n}\nconst list = Object.values(by).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));\nconst business = $('Bank statement upload form').first().json.business || 'a small business';\nconst batches = [];\nfor (let i = 0; i < list.length; i += 40) {\n  const lines = list.slice(i, i + 40).map((m, j) =>\n    `${i + j + 1}. ${m.merchant} | money ${m.ins > m.count / 2 ? 'IN' : 'OUT'} | ${m.count} txn | total ${m.total.toFixed(2)} | e.g. \"${m.sample.slice(0, 60)}\"`);\n  batches.push({ json: { skip_ai: false, business, merchant_count: Math.min(40, list.length - i), merchants: lines.join('\\n') } });\n}\nreturn batches;"
+      },
+      "id": "70fb641c-79d8-58a2-887b-5f68f30ef763",
+      "name": "Group unique merchants",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a careful bookkeeper for {{ $json.business }}. Categorise each merchant from a business bank statement.\n\nAllowed categories (use the exact spelling): Sales, Other income, Refunds received, Cost of sales, Advertising & marketing, Software & subscriptions, Bank & payment fees, Travel, Meals & entertainment, Office & supplies, Professional fees, Rent & utilities, Payroll & contractors, Tax payments, Insurance, Transfers, Owner drawings, Uncategorised\n\nRules:\n- Return one result per merchant line, with \"merchant\" copied exactly as written before the first \"|\".\n- Money IN is normally Sales, Other income, Refunds received or Transfers. Money OUT is never Sales.\n- Transfers between the business's own accounts, card repayments and savings pots are Transfers.\n- HMRC, IRS, VAT, PAYE and corporation tax payments are Tax payments.\n- confidence is 0 to 1. Use \"Uncategorised\" with confidence below 0.5 when the merchant is genuinely unclear. Never guess wildly.\n- reason: at most 8 words.\n\nMerchants ({{ $json.merchant_count }}):\n{{ $json.merchants }}",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 2,
+          "delayBetweenBatches": 8000
+        }
+      },
+      "id": "6640a029-0255-5152-a34c-d4447ea3336f",
+      "name": "Categorise merchants with AI",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1380,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.1,
+          "maxOutputTokens": 4096
+        }
+      },
+      "id": "b6987867-5882-51e6-b7be-6a4ba39c3f62",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1380,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"results\": [\n    {\n      \"merchant\": \"ADOBE\",\n      \"category\": \"Software & subscriptions\",\n      \"confidence\": 0.95,\n      \"reason\": \"Design software subscription\"\n    }\n  ]\n}"
+      },
+      "id": "e94a7784-399d-5d27-ba00-598977799e8c",
+      "name": "Category list format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1520,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map AI categories back onto every transaction and flag rows a human should check\nconst INCOME = [\"Sales\", \"Other income\", \"Refunds received\", \"Transfers\"];\nconst map = {};\nfor (const it of $input.all()) for (const r of (it.json.output?.results || [])) map[String(r.merchant).trim().toUpperCase()] = r;\nreturn $('Normalise transactions').all().map(({ json: t }) => {\n  const r = map[t.merchant] || {};\n  let category = r.category || 'Uncategorised';\n  let confidence = typeof r.confidence === 'number' ? r.confidence : 0;\n  let check = '';\n  if (t.direction === 'out' && ['Sales', 'Other income'].includes(category)) check = 'Money out labelled as income';\n  if (t.direction === 'in' && !INCOME.includes(category) && category !== 'Uncategorised') check = 'Money in labelled as an expense';\n  if (/-\\d+$/.test(t.txn_id)) check = 'Possible duplicate: same date, amount and description as another row';\n  const needs_review = category === 'Uncategorised' || confidence < 0.7 || !!check;\n  return { json: { txn_id: t.txn_id, date: t.date, description: t.description, merchant: t.merchant, amount: t.amount,\n    currency: t.currency, category, confidence: Math.round(confidence * 100) / 100, needs_review: needs_review ? 'YES' : '',\n    review_note: check || (needs_review ? 'Low confidence' : ''), ai_reason: r.reason || '', corrected_category: '' } };\n});"
+      },
+      "id": "b351c9ef-1244-5005-b143-815fed0ad3eb",
+      "name": "Apply categories to transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Categorise merchants with AI",
+        "height": 500,
+        "width": 820,
+        "color": 7
+      },
+      "id": "d0aef609-d622-51ee-8b0d-0aa9dd77ef0d",
+      "name": "Section: Categorise merchants with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Transactions"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "txn_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "e3a8e380-613c-5a18-96c2-271e78cc9591",
+      "name": "Save to Transactions sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2040,
+        -80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Header row: txn_id, date, description, merchant, amount, currency, category, confidence, needs_review, review_note, ai_reason, corrected_category"
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n// Build the summary shown on the form's result page\nconst rows = $('Apply categories to transactions').all().map(i => i.json);\nconst cur = rows[0]?.currency || '';\nconst f = n => `${cur} ${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;\nconst income = rows.filter(r => r.amount > 0 && r.category !== 'Transfers').reduce((s, r) => s + r.amount, 0);\nconst spend = rows.filter(r => r.amount < 0 && r.category !== 'Transfers').reduce((s, r) => s - r.amount, 0);\nconst cats = {};\nfor (const r of rows) (cats[r.category] = cats[r.category] || { n: 0, total: 0 }), cats[r.category].n++, cats[r.category].total += r.amount;\nconst merch = {};\nfor (const r of rows.filter(r => r.amount < 0 && r.category !== 'Transfers')) merch[r.merchant] = (merch[r.merchant] || 0) - r.amount;\nconst top = Object.entries(merch).sort((a, b) => b[1] - a[1]).slice(0, 5);\nconst review = rows.filter(r => r.needs_review === 'YES').length;\nconst dates = rows.map(r => r.date).sort();\nconst catRows = Object.entries(cats).sort((a, b) => a[1].total - b[1].total)\n  .map(([c, v]) => `<tr><td>${esc(c)}</td><td style=\"text-align:right\">${v.n}</td><td style=\"text-align:right\">${f(v.total)}</td></tr>`).join('');\nconst html = `<h3>${rows.length} transactions categorised (${dates[0]} to ${dates[dates.length - 1]})</h3>\n<p><b>Income:</b> ${f(income)} &nbsp; <b>Spending:</b> ${f(spend)} &nbsp; <b>Net:</b> ${f(income - spend)} <br><small>Transfers between your own accounts are excluded.</small></p>\n<p><b>${review}</b> row(s) are marked <i>needs_review</i> in your sheet. Fix them in the <i>corrected_category</i> column.</p>\n<table style=\"width:100%;border-collapse:collapse\"><tr><th align=\"left\">Category</th><th>Txns</th><th>Total</th></tr>${catRows}</table>\n<p><b>Top suppliers:</b> ${top.map(([m, v]) => `${esc(m)} (${f(v)})`).join(', ') || 'none'}</p>`;\nreturn [{ json: { html, income, spend, review, count: rows.length } }];"
+      },
+      "id": "2a2e1938-9cb5-545b-97cf-f1f10abf4a54",
+      "name": "Build summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2280,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {
+          "formTitle": "Statement categorised"
+        }
+      },
+      "id": "138608e1-1698-58a8-b972-b931c02e26a1",
+      "name": "Show summary page",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2520,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "=<p>{{ $json.reason }}</p><p>Export the statement as CSV with a header row (date, description, amount or paid in / paid out) and try again.</p>",
+        "options": {
+          "formTitle": "Could not read this file"
+        }
+      },
+      "id": "cd1f355f-5b0b-59d2-94eb-31b042d8b181",
+      "name": "Explain unreadable file",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2520,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Save and summarise",
+        "height": 560,
+        "width": 700,
+        "color": 7
+      },
+      "id": "c4589175-39d2-5f50-a756-fb1829973a81",
+      "name": "Section: Save and summarise",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9e6410a4-ce9e-5ebf-a30b-6d19f3a3c1ef",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "1ef5019b-b403-5f4e-83b3-2a9767ff1105",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        120,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "da88bed9-a802-52e9-a62c-ef02e715e8c1",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "a660a140-e852-5b0d-9d2f-4e36b57d740b",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "3bc859c3-fe3c-5e6f-83f7-90d133d1d3ea",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Categorise merchants with AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Category list format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Categorise merchants with AI",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read CSV rows": {
+      "main": [
+        [
+          {
+            "node": "Normalise transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise transactions": {
+      "main": [
+        [
+          {
+            "node": "Were transactions found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Were transactions found?": {
+      "main": [
+        [
+          {
+            "node": "Group unique merchants",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain unreadable file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group unique merchants": {
+      "main": [
+        [
+          {
+            "node": "Categorise merchants with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Categorise merchants with AI": {
+      "main": [
+        [
+          {
+            "node": "Apply categories to transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply categories to transactions": {
+      "main": [
+        [
+          {
+            "node": "Save to Transactions sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Transactions sheet": {
+      "main": [
+        [
+          {
+            "node": "Build summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build summary": {
+      "main": [
+        [
+          {
+            "node": "Show summary page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Read CSV rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bank statement upload form": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
