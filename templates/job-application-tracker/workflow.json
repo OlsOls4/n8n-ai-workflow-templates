@@ -1,0 +1,501 @@
+{
+  "name": "Track job application emails from Gmail in Google Sheets with AI status detection",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Track job application emails from Gmail in Google Sheets with AI status detection\n\nStop losing track of where you applied. This workflow watches your Gmail for application confirmations, rejections, interview invites and offers, uses Google Gemini to work out the company, role and status, and keeps one row per application up to date in Google Sheets.\n\n### How it works\n1. **Check Gmail for application emails** polls every hour with a search that skips promotions and social mail.\n2. **Prepare email for AI** trims each email to the parts that matter.\n3. **Detect company, role and status** returns structured JSON (applied, assessment, interview, offer, rejected, recruiter outreach).\n4. Emails that are not about your own applications are dropped.\n5. **Update application in Google Sheets** upserts by company + role, so a rejection or interview invite updates the existing row instead of adding a new one.\n\n### Setup\n1. Add a **Gmail OAuth2** credential and a free **Google Gemini (PaLM) API** credential.\n2. Create a Google Sheet with an `Applications` tab and this header row: `application_key, company, role, status, next_step, deadline, last_update, last_subject, from, gmail_link`.\n3. Put the Sheet ID in **Config** and connect **Google Sheets**.\n4. Activate. The first poll reads only new emails from now on.\n\n### Customization\n- Tighten or widen the Gmail search in the trigger's *Search* filter.\n- Add more statuses (for example `withdrawn`) to the prompt and use conditional formatting in the sheet.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 900,
+        "width": 600
+      },
+      "id": "713777f6-0e2b-51ab-baa4-7dcc18ea02b1",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "-category:promotions -category:social (application OR applying OR applied OR interview OR candidacy OR position OR role OR offer OR assessment)",
+          "readStatus": "both"
+        },
+        "options": {}
+      },
+      "id": "d4eb8cfa-caf9-5461-b35f-085487275338",
+      "name": "Check Gmail for application emails",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep only what the AI needs: sender, subject, date and the first 3000 characters of text\nreturn $input.all().map(i => {\n  const m = i.json;\n  const body = (m.text || (m.html || '').replace(/<[^>]+>/g, ' ') || m.snippet || '').replace(/\\s+/g, ' ').trim();\n  return { json: {\n    message_id: m.id, thread_id: m.threadId,\n    from: m.from?.text || m.from?.value?.[0]?.address || '',\n    subject: m.subject || '', date: m.date || '', body: body.slice(0, 3000)\n  } };\n});"
+      },
+      "id": "a82f65a1-632b-5273-bcf1-c090af639606",
+      "name": "Prepare email for AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Watch Gmail",
+        "height": 300,
+        "width": 680,
+        "color": 7
+      },
+      "id": "ae083c74-06f5-58b6-8989-d2a46b230d18",
+      "name": "Section: Watch Gmail",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You read one email from a job seeker's inbox and decide whether it is about one of their own job applications.\n\nFrom: {{ $json.from }}\nSubject: {{ $json.subject }}\nDate: {{ $json.date }}\nBody:\n{{ $json.body }}\n\nRules:\n- is_job_application is true only for emails about an application this person made or a recruiter contacting them about a specific role. Newsletters, job alerts, marketing and course emails are false.\n- status is one of: applied (confirmation received), assessment (test or task), interview (invite or scheduling), offer, rejected, recruiter_outreach, other.\n- company and role: use the hiring company (not the ATS such as Workday or Greenhouse). Use \"Unknown\" if not stated.\n- deadline: an ISO date (YYYY-MM-DD) if the email names one, otherwise an empty string.\n- next_step: under 12 words, empty string if none.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 5,
+          "delayBetweenBatches": 5000
+        }
+      },
+      "id": "4cc388d4-0316-51c3-9886-b63e101ab47f",
+      "name": "Detect company, role and status",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        660,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "909e4e62-302a-5d0a-bdc2-ee6ec9b0b7f9",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"is_job_application\": true,\n  \"company\": \"Acme Ltd\",\n  \"role\": \"Data Analyst\",\n  \"status\": \"interview\",\n  \"next_step\": \"Video interview on Tuesday\",\n  \"deadline\": \"2026-10-21\",\n  \"confidence\": \"high\"\n}"
+      },
+      "id": "95618995-09af-5d55-baeb-49229bc84fd5",
+      "name": "Application status format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        800,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "156de1e0-cd07-56cf-b30c-f17a055db308",
+              "leftValue": "={{ $json.output.is_job_application }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "92f74249-ce78-5e7b-a300-34d1c6c8da0c",
+      "name": "Keep job application emails",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        960,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Detect the status with AI",
+        "height": 500,
+        "width": 520,
+        "color": 7
+      },
+      "id": "b7a9e9d6-1062-56e4-b21e-a1d4c8ad47a2",
+      "name": "Section: Detect the status with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        600,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2d6449c5-91d2-5fb4-bf08-93e98340e510",
+              "name": "application_key",
+              "value": "={{ ($json.output.company + '|' + $json.output.role).toLowerCase().replace(/[^a-z0-9|]+/g, ' ').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "3154fef0-9cc5-5675-afb6-ac83038464dd",
+              "name": "company",
+              "value": "={{ $json.output.company }}",
+              "type": "string"
+            },
+            {
+              "id": "efbb4288-a413-5fce-b7df-c41fce5aedbc",
+              "name": "role",
+              "value": "={{ $json.output.role }}",
+              "type": "string"
+            },
+            {
+              "id": "ad58d708-7e6c-538a-b227-5adfd2190ebd",
+              "name": "status",
+              "value": "={{ $json.output.status }}",
+              "type": "string"
+            },
+            {
+              "id": "e19fa098-2cb5-5e13-baf6-3df6d290e301",
+              "name": "next_step",
+              "value": "={{ $json.output.next_step }}",
+              "type": "string"
+            },
+            {
+              "id": "3428a3f1-b1a5-53d6-b8a4-c07fa04c3f6b",
+              "name": "deadline",
+              "value": "={{ $json.output.deadline }}",
+              "type": "string"
+            },
+            {
+              "id": "67a61db2-1725-55b9-955c-e4b1860261d1",
+              "name": "last_update",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm') }}",
+              "type": "string"
+            },
+            {
+              "id": "2e327167-0ff8-53e5-b6b6-7299db3c6124",
+              "name": "last_subject",
+              "value": "={{ $('Prepare email for AI').item.json.subject }}",
+              "type": "string"
+            },
+            {
+              "id": "8f068547-fda3-55c2-a0c3-e299e21f7d95",
+              "name": "from",
+              "value": "={{ $('Prepare email for AI').item.json.from }}",
+              "type": "string"
+            },
+            {
+              "id": "f400ccfa-5240-5353-b905-aae001a9eaf3",
+              "name": "gmail_link",
+              "value": "=https://mail.google.com/mail/u/0/#all/{{ $('Prepare email for AI').item.json.thread_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4fee97d6-0ad7-5557-add3-40dfb751783f",
+      "name": "Prepare application row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1260,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Applications"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "application_key"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "9fdc0338-0d49-578b-836f-0d80af01c5b8",
+      "name": "Update application in Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1500,
+        -80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Update the tracker",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "355f0de3-edf9-5917-a01a-0801a6571bf6",
+      "name": "Section: Update the tracker",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9e6410a4-ce9e-5ebf-a30b-6d19f3a3c1ef",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "ca774e80-e863-5a29-973d-ba05e3102ea4",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        120,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "688d5651-68fd-5ddf-b634-c8f522473412",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "99a03b30-5642-54fe-9707-8c24283a20a3",
+      "position": [
+        140,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "b015f866-efad-54a8-b634-422f5fe2879c",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Detect company, role and status",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Application status format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Detect company, role and status",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare email for AI": {
+      "main": [
+        [
+          {
+            "node": "Detect company, role and status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect company, role and status": {
+      "main": [
+        [
+          {
+            "node": "Keep job application emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep job application emails": {
+      "main": [
+        [
+          {
+            "node": "Prepare application row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare application row": {
+      "main": [
+        [
+          {
+            "node": "Update application in Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Prepare email for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Gmail for application emails": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
