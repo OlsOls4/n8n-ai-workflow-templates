@@ -1,0 +1,629 @@
+{
+  "name": "Screen CVs from an n8n form against your job description with Gemini and Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Screen CVs from an n8n form against your job description with Gemini and Google Sheets\n\nCollect applications through a hosted n8n form, read each PDF CV, and let Google Gemini score it against your job description. Every candidate lands in Google Sheets with a 0-100 score, a recommendation and the must-haves they meet or miss, so you only open the CVs worth reading.\n\n### How it works\n1. Candidates fill in the **Job application form** (name, email, PDF CV, optional note).\n2. **Extract text from CV** reads the PDF. Scanned or image-only PDFs are flagged instead of scored.\n3. **Score CV against job description** compares the CV with the role you set and returns structured JSON. The prompt ignores protected characteristics and only judges job evidence.\n4. The result is appended to your Google Sheet and the candidate sees a thank-you page.\n\n### Setup\n1. Add a free **Google Gemini (PaLM) API** credential (key from aistudio.google.com).\n2. Create a Google Sheet with a `Candidates` tab and this header row: `submitted_at, name, email, score, recommendation, summary, must_haves_met, must_haves_missing, strengths, gaps, years_experience, red_flags, location, note, cv_filename`.\n3. Put the Sheet ID in **Set job description** and connect your **Google Sheets** credential.\n4. Paste your role into **Set job description**.\n5. Activate the workflow and share the form's production URL in your job ad.\n\n### Customization\n- Change the scoring rules or thresholds in **Score CV against job description**.\n- Sort the sheet by `score` or add a filter view for `shortlist`.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 900,
+        "width": 600
+      },
+      "id": "de5f1ae5-67c9-5a8a-ad52-3863fd16f009",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Apply for this role",
+        "formDescription": "Upload your CV as a PDF. We review every application.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Full name",
+              "fieldName": "name",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email",
+              "fieldName": "email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "CV (PDF)",
+              "fieldName": "cv",
+              "fieldType": "file",
+              "requiredField": true,
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf"
+            },
+            {
+              "fieldLabel": "Anything you'd like to add?",
+              "fieldName": "note",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Submit"
+        }
+      },
+      "id": "2b0f1f6d-816d-5370-81be-4c4ae8529d71",
+      "name": "Job application form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "f76d4e7c-ef60-5207-ad10-3335ac026a6b"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "cv",
+        "options": {}
+      },
+      "id": "4587cd24-c468-5a97-be7c-a4359fabfab4",
+      "name": "Extract text from CV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        140,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "565228f1-ac04-55d8-8bda-5336054aa0e5",
+              "name": "job_title",
+              "value": "Customer Success Manager",
+              "type": "string"
+            },
+            {
+              "id": "0f00971e-6b81-5165-bfa3-3051cbb05c72",
+              "name": "job_description",
+              "value": "We are a 20-person SaaS company hiring a Customer Success Manager to own onboarding and renewals for 60 B2B accounts. You will run onboarding calls, spot churn risk, and work with sales on upsells.",
+              "type": "string"
+            },
+            {
+              "id": "ac29b275-ffc1-5757-8532-f8dd98fd5170",
+              "name": "must_haves",
+              "value": "2+ years in customer success or account management; B2B SaaS experience; excellent written English",
+              "type": "string"
+            },
+            {
+              "id": "f875c750-67c5-5b30-bc07-5e1340628e92",
+              "name": "nice_to_haves",
+              "value": "HubSpot; experience with onboarding programmes; second European language",
+              "type": "string"
+            },
+            {
+              "id": "5dbcf7b8-6866-5da6-89ea-09f4d90ec602",
+              "name": "cv_text",
+              "value": "={{ ($json.text || '').replace(/\\s+/g, ' ').trim().slice(0, 12000) }}",
+              "type": "string"
+            },
+            {
+              "id": "999a39b0-c25f-5611-8928-587608796bce",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "18174854-79f9-55ba-bddb-468cd139133b",
+      "name": "Set job description",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "fa489e5b-7b2e-55b3-a42c-1c825936b755",
+              "leftValue": "={{ $json.cv_text.length }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "679b7ccd-155c-55f7-9438-862b46e3e774",
+      "name": "Is the CV readable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Receive the application",
+        "height": 300,
+        "width": 940,
+        "color": 7
+      },
+      "id": "9af358b7-7934-5869-b90e-28883b0353f3",
+      "name": "Section: Receive the application",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an experienced, fair recruiter screening CVs for one role.\n\nRole: {{ $json.job_title }}\nJob description: {{ $json.job_description }}\nMust-haves: {{ $json.must_haves }}\nNice-to-haves: {{ $json.nice_to_haves }}\n\nScoring rules:\n- Judge only job-relevant evidence in the CV: skills, experience, results, qualifications.\n- Ignore name, age, gender, ethnicity, nationality, religion, photos, marital status and any other protected characteristic. Never mention them.\n- score is 0-100. 80+ means clearly meets the must-haves; 50-79 partly; under 50 does not.\n- recommendation is one of: shortlist, maybe, reject.\n- Do not invent experience the CV does not show. If the CV text is empty or unreadable, score 0 and say so in summary.\n- Keep summary under 35 words, each list item under 8 words.\n\nCV text:\n{{ $json.cv_text }}",
+        "hasOutputParser": true
+      },
+      "id": "93571fc5-1c6f-58fa-ab80-72c37738fb3f",
+      "name": "Score CV against job description",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        920,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "652322ef-9e92-58a1-9c2f-4d41dfe6c772",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        920,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"score\": 78,\n  \"recommendation\": \"shortlist\",\n  \"summary\": \"Backend developer with 5 years of Python and AWS, led a small team.\",\n  \"must_haves_met\": [\n    \"Python\",\n    \"AWS\"\n  ],\n  \"must_haves_missing\": [\n    \"Kubernetes\"\n  ],\n  \"strengths\": [\n    \"5 years Python\",\n    \"Team lead experience\"\n  ],\n  \"gaps\": [\n    \"No Kubernetes\"\n  ],\n  \"years_experience\": 5,\n  \"red_flags\": [],\n  \"location\": \"Leeds, UK\"\n}"
+      },
+      "id": "287b6c67-4bf4-58eb-856d-40929e70a9df",
+      "name": "Screening result format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1060,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Score the CV with AI",
+        "height": 500,
+        "width": 340,
+        "color": 7
+      },
+      "id": "738a48e8-81a0-5c92-9dd4-77b927b33437",
+      "name": "Section: Score the CV with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        860,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9e61d0f9-6871-5922-b325-4460dfc438d1",
+              "name": "submitted_at",
+              "value": "={{ $('Job application form').item.json.submittedAt }}",
+              "type": "string"
+            },
+            {
+              "id": "fba5a41b-8101-552a-baa6-e81deca62431",
+              "name": "name",
+              "value": "={{ $('Job application form').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "d1f48059-839c-56b0-9e77-aa12927d1d24",
+              "name": "email",
+              "value": "={{ $('Job application form').item.json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "431bc353-7c06-5c3e-b2b6-f6bbd3b93b47",
+              "name": "score",
+              "value": "={{ $json.output.score }}",
+              "type": "number"
+            },
+            {
+              "id": "df53c04f-3fb1-5866-9fcd-520922eff391",
+              "name": "recommendation",
+              "value": "={{ $json.output.recommendation }}",
+              "type": "string"
+            },
+            {
+              "id": "2ba93684-a911-5d97-851f-bfb8bd5a9170",
+              "name": "summary",
+              "value": "={{ $json.output.summary }}",
+              "type": "string"
+            },
+            {
+              "id": "7a1677be-7752-50fb-8d41-46f4d24f2f6c",
+              "name": "must_haves_met",
+              "value": "={{ ($json.output.must_haves_met || []).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "9163b6e3-0696-52aa-b351-dc396d08d6bf",
+              "name": "must_haves_missing",
+              "value": "={{ ($json.output.must_haves_missing || []).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "d7cdf9f4-4da8-5acd-b35d-be0ec778b2cb",
+              "name": "strengths",
+              "value": "={{ ($json.output.strengths || []).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "38f8e9e6-0a01-5bcf-8569-5158b988914a",
+              "name": "gaps",
+              "value": "={{ ($json.output.gaps || []).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "df37f98b-61ab-5440-9dfb-f3531040f289",
+              "name": "years_experience",
+              "value": "={{ $json.output.years_experience }}",
+              "type": "number"
+            },
+            {
+              "id": "68c65dd1-04b8-5fa2-b137-cac61fa75523",
+              "name": "red_flags",
+              "value": "={{ ($json.output.red_flags || []).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "a7fcd904-6f72-5a1f-ac69-44d3e8749851",
+              "name": "location",
+              "value": "={{ $json.output.location }}",
+              "type": "string"
+            },
+            {
+              "id": "6ba78fbb-5317-5791-8101-8a9e3bd7d88b",
+              "name": "note",
+              "value": "={{ $('Job application form').item.json.note || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "22132ab0-3eb2-5dd8-be41-8bac610a838a",
+              "name": "cv_filename",
+              "value": "={{ $('Job application form').item.binary?.cv?.fileName || 'cv.pdf' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "983bdaba-df2d-509b-8bfb-d626c654a5ee",
+      "name": "Prepare candidate row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1340,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set job description').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Candidates"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "c80756de-c931-51fe-b206-f9bc039b5ed5",
+      "name": "Log candidate to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1580,
+        -80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "<p>Thanks {{ $('Job application form').item.json.name }}, your application has been received. We'll be in touch.</p>",
+        "options": {
+          "formTitle": "Application received"
+        }
+      },
+      "id": "372408ca-679e-5dd8-9d74-e74001fe19fd",
+      "name": "Show thank-you page",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1820,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "<p>We couldn't read text from that file. Please export your CV as a text-based PDF (not a scan or photo) and submit the form again.</p>",
+        "options": {
+          "formTitle": "Please re-upload your CV"
+        }
+      },
+      "id": "b896eafb-205e-5ad1-ae0e-793d731891a3",
+      "name": "Ask for a text-based PDF",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1820,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Log the candidate and confirm",
+        "height": 540,
+        "width": 700,
+        "color": 7
+      },
+      "id": "e219ab37-2b51-52fa-9d03-07d9aae241d6",
+      "name": "Section: Log the candidate and confirm",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "cfb0714d-fbb6-504a-89ea-4fad4ce0534a",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "fd5bdd7e-b704-51bb-a07c-a6b57c35461a",
+      "position": [
+        140,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "6907dfa1-5419-55e0-afc9-6f83fdf325bf",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score CV against job description",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Screening result format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score CV against job description",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job application form": {
+      "main": [
+        [
+          {
+            "node": "Extract text from CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text from CV": {
+      "main": [
+        [
+          {
+            "node": "Set job description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set job description": {
+      "main": [
+        [
+          {
+            "node": "Is the CV readable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is the CV readable?": {
+      "main": [
+        [
+          {
+            "node": "Score CV against job description",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask for a text-based PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score CV against job description": {
+      "main": [
+        [
+          {
+            "node": "Prepare candidate row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare candidate row": {
+      "main": [
+        [
+          {
+            "node": "Log candidate to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log candidate to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Show thank-you page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
