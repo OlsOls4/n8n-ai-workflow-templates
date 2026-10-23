@@ -1,0 +1,696 @@
+{
+  "name": "Find striking-distance keywords in Google Search Console and write content briefs with Gemini",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Find striking-distance keywords in Google Search Console and write content briefs with Gemini\n\nEvery Monday, pull the last 28 days of Google Search Console data, find the queries where your pages rank in positions 4-20 (close to page-one top spots), estimate the extra clicks a move to position 3 would bring, read each page, and let Gemini write a brief to improve that page. Briefs land in Google Sheets. For SEO freelancers, content teams and site owners who want a weekly to-do list instead of a dashboard.\n\n### How it works\n1. **Query Search Console** calls the Search Analytics API (query + page, last 28 days, 3-day data lag skipped).\n2. **Find striking-distance keywords** filters by position band, impressions and brand terms, scores each query by potential clicks (impressions x the CTR gap to position 3) and keeps the top pages.\n3. **Fetch the ranking page** and **Read page content** check the title, H1, H2s, word count and whether each query appears on the page.\n4. **Write content brief** returns title, meta description, H2 outline, missing subtopics, FAQs and quick wins.\n5. Briefs are appended to the `Briefs` tab.\n\n### Setup\n1. Create an **OAuth2 API** credential for Google: auth URL `https://accounts.google.com/o/oauth2/v2/auth`, token URL `https://oauth2.googleapis.com/token`, scope `https://www.googleapis.com/auth/webmasters.readonly`, auth query `access_type=offline&prompt=consent` (details in README.md).\n2. Add **Google Gemini (PaLM) API** and **Google Sheets** credentials and put the Sheet ID in **Set report settings**.\n3. Set your property (`sc-domain:example.com` or `https://www.example.com/`) and brand terms in **Set report settings**.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1080,
+        "width": 600
+      },
+      "id": "0fffcd81-2955-5e2e-b9d6-15259d6e0b16",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "acae627e-d00c-50af-8569-e451927e4376",
+      "name": "Every Monday at 7am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "09b9be82-69ec-53c7-9fba-f5de274f334f",
+              "name": "site_url",
+              "value": "sc-domain:example.com",
+              "type": "string"
+            },
+            {
+              "id": "1a7b4a08-29aa-540c-a3d4-55250a1e7492",
+              "name": "min_position",
+              "value": 4,
+              "type": "number"
+            },
+            {
+              "id": "0fd41a9b-254b-5e12-bcfc-1c8bb376a9c9",
+              "name": "max_position",
+              "value": 20,
+              "type": "number"
+            },
+            {
+              "id": "9178aaa9-a5f2-5ab0-a428-a65f93d7237b",
+              "name": "min_impressions",
+              "value": 50,
+              "type": "number"
+            },
+            {
+              "id": "10e950c0-7baf-57b0-b792-f8dd43d5f249",
+              "name": "brand_terms",
+              "value": "examplebrand, example brand",
+              "type": "string"
+            },
+            {
+              "id": "b9bc3402-3cab-5d55-a8df-d82e42d56902",
+              "name": "max_pages",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "e3deb966-725d-596f-8365-4b8fdd59eac1",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "98100214-9e88-51d1-aefc-c3c03dbbb29e",
+      "name": "Set report settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/webmasters/v3/sites/{{ encodeURIComponent($json.site_url) }}/searchAnalytics/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ startDate: $today.minus({ days: 31 }).toFormat('yyyy-MM-dd'), endDate: $today.minus({ days: 3 }).toFormat('yyyy-MM-dd'), dimensions: [\"query\",\"page\"], rowLimit: 5000, type: 'web' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "26979855-6bbc-5cad-b407-96899340f011",
+      "name": "Query Search Console",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        380,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Google Search Console OAuth2"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## 1. Pull Search Console data",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "a0aefc6e-edfe-56aa-8dca-de056526e3eb",
+      "name": "Section: Pull Search Console data",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const EXPECTED = [0, 0.28, 0.16, 0.11, 0.08, 0.065, 0.05, 0.04, 0.033, 0.028, 0.025, 0.018, 0.016, 0.014, 0.012, 0.011, 0.01, 0.009, 0.008, 0.007, 0.006];\nconst exp = p => EXPECTED[Math.min(20, Math.max(1, Math.round(p)))] || 0.005;\n\n// Keep queries ranking in the striking-distance band, score the extra clicks a move to position 3 would bring, group by page\nconst cfg = $('Set report settings').first().json;\nconst brand = String(cfg.brand_terms || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);\nconst rows = ($json.rows || []).map(r => ({ query: r.keys[0], page: r.keys[1], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }))\n  .filter(r => r.position >= Number(cfg.min_position) && r.position <= Number(cfg.max_position) && r.impressions >= Number(cfg.min_impressions)\n    && !brand.some(b => r.query.toLowerCase().includes(b)));\nfor (const r of rows) r.potential = Math.max(0, Math.round(r.impressions * (exp(3) - r.ctr)));\nconst pages = {};\nfor (const r of rows) (pages[r.page] = pages[r.page] || []).push(r);\nconst out = Object.entries(pages).map(([page, qs]) => {\n  qs.sort((a, b) => b.potential - a.potential);\n  const top = qs.slice(0, 8);\n  return { page, main_query: top[0].query, potential_clicks: top.reduce((s, q) => s + q.potential, 0),\n    impressions: top.reduce((s, q) => s + q.impressions, 0), clicks: top.reduce((s, q) => s + q.clicks, 0),\n    best_position: Math.min(...top.map(q => q.position)).toFixed(1),\n    queries: top.map(q => `${q.query} (pos ${q.position.toFixed(1)}, ${q.impressions} impr, ${(q.ctr * 100).toFixed(1)}% CTR)`) };\n}).sort((a, b) => b.potential_clicks - a.potential_clicks).slice(0, Number(cfg.max_pages) || 5);\nif (!out.length) return [{ json: { none: true, rows_checked: ($json.rows || []).length } }];\nreturn out.map(json => ({ json: { none: false, ...json } }));"
+      },
+      "id": "a948d4ef-e5ce-51c1-96ca-efd407d36bae",
+      "name": "Find striking-distance keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5e201872-2556-5af9-bf62-a94168902a5e",
+              "leftValue": "={{ $json.none }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9a4e50f4-869a-5e74-96b8-e546af9772e6",
+      "name": "Any opportunities?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "88ace709-5c72-5cce-9681-1a18e282210e",
+      "name": "No opportunities this week",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.page }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n-workflow/1.0)"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "c06c8b2c-9ae1-540e-96ab-d0ea93304f63",
+      "name": "Fetch the ranking page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read what the page already covers so the brief improves it instead of repeating it\nconst opps = $('Find striking-distance keywords').all();\nreturn $input.all().map((it, i) => {\n  const o = opps[i].json;\n  const html = String(it.json.body ?? it.json.data ?? '');\n  const strip = s => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/&#(\\d+);/g, (m, d) => String.fromCharCode(Number(d))).replace(/\\s+/g, ' ').trim();\n  const title = strip((html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i) || [])[1]);\n  const meta = strip((html.match(/<meta[^>]+name=[\"']description[\"'][^>]*content=[\"']([^\"']*)/i) || [])[1]);\n  const h1 = strip((html.match(/<h1\\b[^>]*>([\\s\\S]*?)<\\/h1>/i) || [])[1]);\n  const h2s = (html.match(/<h2\\b[^>]*>[\\s\\S]*?<\\/h2>/gi) || []).map(strip).filter(Boolean).slice(0, 15);\n  const body = strip((html.match(/<body[^>]*>([\\s\\S]*)<\\/body>/i) || [, html])[1].replace(/<script[\\s\\S]*?<\\/script>|<style[\\s\\S]*?<\\/style>|<(nav|footer)\\b[\\s\\S]*?<\\/\\1>/gi, ' '));\n  const words = body ? body.split(' ').length : 0;\n  const lower = body.toLowerCase();\n  const coverage = o.queries.map(q => { const k = q.split(' (pos')[0]; return `${k}: ${title.toLowerCase().includes(k) ? 'in title' : lower.includes(k) ? 'in body only' : 'NOT on page'}`; });\n  return { json: { ...o, page_loaded: Number(it.json.statusCode) === 200, title, meta_description: meta, h1, h2s, words, coverage, excerpt: body.slice(0, 1500) } };\n});"
+      },
+      "id": "94007896-f788-56d4-a6ee-17ccf1d79121",
+      "name": "Read page content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Pick the best opportunities",
+        "height": 500,
+        "width": 940,
+        "color": 7
+      },
+      "id": "d0b15cab-df5e-5ccd-8f7f-5ce270fcd29b",
+      "name": "Section: Pick the best opportunities",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        620,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an SEO content strategist. This page already ranks on Google's first or second page for the queries below. Write a brief to improve THIS page (not a new article) so it can move into the top 3.\n\nPage: {{ $json.page }}\nCurrent title: {{ $json.title }}\nCurrent meta description: {{ $json.meta_description }}\nH1: {{ $json.h1 }}\nH2s: {{ $json.h2s.join(' | ') }}\nWord count: {{ $json.words }}\nQueries (last 28 days): {{ $json.queries.join('; ') }}\nWhere the queries appear: {{ $json.coverage.join('; ') }}\nOpening content: {{ $json.excerpt }}\n\nRules:\n- primary_keyword is the query with the most potential; search_intent is informational, commercial, transactional or navigational.\n- recommended_title 30-60 characters, recommended_meta_description 120-155 characters, both containing the primary keyword naturally.\n- h2_outline: the full improved H2 structure (keep good existing H2s, add missing ones), max 10.\n- missing_subtopics: what searchers for these queries expect that the page lacks, max 6.\n- faq_questions: 3-5 real questions to answer on the page.\n- quick_wins: 2-4 edits that take under 15 minutes.\n- Do not invent statistics, prices or claims about the business.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 2,
+          "delayBetweenBatches": 8000
+        }
+      },
+      "id": "fc6dbd74-15a8-5ce5-88dd-a1cb37337247",
+      "name": "Write content brief",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1700,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "bbcd170a-ddf6-5499-86c0-71ba0ce166d7",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"primary_keyword\": \"boiler service cost\",\n  \"search_intent\": \"commercial\",\n  \"recommended_title\": \"Boiler Service Cost in 2026: Prices, What's Included and Tips\",\n  \"recommended_meta_description\": \"How much does a boiler service cost? See typical prices, what an engineer checks and how to book.\",\n  \"h2_outline\": [\n    \"How much does a boiler service cost?\",\n    \"What is included in a service\"\n  ],\n  \"missing_subtopics\": [\n    \"Price by boiler type\"\n  ],\n  \"faq_questions\": [\n    \"How often should a boiler be serviced?\"\n  ],\n  \"quick_wins\": [\n    \"Add the main keyword to the H1\"\n  ],\n  \"estimated_effort\": \"1-2 hours\"\n}"
+      },
+      "id": "def7dd41-cd9d-5ad3-8a47-ac4f2a105b06",
+      "name": "Brief format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1840,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "34128533-eb50-5c98-a346-92bb8e6e5210",
+              "name": "week",
+              "value": "={{ $today.toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "feb2df87-e9d9-5959-9861-4c4a084f1f61",
+              "name": "page",
+              "value": "={{ $('Read page content').item.json.page }}",
+              "type": "string"
+            },
+            {
+              "id": "f7269f01-beb1-54f3-bcad-e8147360bf3c",
+              "name": "primary_keyword",
+              "value": "={{ $json.output.primary_keyword }}",
+              "type": "string"
+            },
+            {
+              "id": "3fb60cef-4991-5ed1-9130-4ce1d84c7a44",
+              "name": "potential_clicks",
+              "value": "={{ $('Read page content').item.json.potential_clicks }}",
+              "type": "number"
+            },
+            {
+              "id": "09850f8b-2062-5f7a-986c-d19f0e0660da",
+              "name": "impressions_28d",
+              "value": "={{ $('Read page content').item.json.impressions }}",
+              "type": "number"
+            },
+            {
+              "id": "92ca8da6-495e-5d1c-943c-cc14fa9845c6",
+              "name": "best_position",
+              "value": "={{ $('Read page content').item.json.best_position }}",
+              "type": "string"
+            },
+            {
+              "id": "21bdfe19-34c3-554e-add1-f72ed46846a6",
+              "name": "queries",
+              "value": "={{ $('Read page content').item.json.queries.join('\\n') }}",
+              "type": "string"
+            },
+            {
+              "id": "a7c4c025-1fde-5c07-abad-96a799444950",
+              "name": "search_intent",
+              "value": "={{ $json.output.search_intent }}",
+              "type": "string"
+            },
+            {
+              "id": "85654e3a-5643-5728-80ec-36709048b164",
+              "name": "recommended_title",
+              "value": "={{ $json.output.recommended_title }}",
+              "type": "string"
+            },
+            {
+              "id": "2f362cbc-4089-5d63-b54a-d39bda49b422",
+              "name": "recommended_meta",
+              "value": "={{ $json.output.recommended_meta_description }}",
+              "type": "string"
+            },
+            {
+              "id": "89ef2575-3071-5de6-abe0-64c7b0e90e09",
+              "name": "h2_outline",
+              "value": "={{ ($json.output.h2_outline || []).join('\\n') }}",
+              "type": "string"
+            },
+            {
+              "id": "5496a647-523c-5972-8f94-5316076f96e4",
+              "name": "missing_subtopics",
+              "value": "={{ ($json.output.missing_subtopics || []).join('\\n') }}",
+              "type": "string"
+            },
+            {
+              "id": "9a6166e5-8f28-5da1-af13-c69bd2c6d3b7",
+              "name": "faq_questions",
+              "value": "={{ ($json.output.faq_questions || []).join('\\n') }}",
+              "type": "string"
+            },
+            {
+              "id": "98d649f9-a65e-5d85-971b-85046bf49732",
+              "name": "quick_wins",
+              "value": "={{ ($json.output.quick_wins || []).join('\\n') }}",
+              "type": "string"
+            },
+            {
+              "id": "79ef5975-84e8-5b99-a5b1-cf380137d2de",
+              "name": "status",
+              "value": "to do",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "28ba7564-26b6-55c2-a774-e832c875daf9",
+      "name": "Prepare brief row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2060,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set report settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Briefs"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "1badd5fd-96a7-5b3c-bb5f-7343ba093d48",
+      "name": "Save briefs to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2300,
+        -80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Write and save the briefs",
+        "height": 500,
+        "width": 820,
+        "color": 7
+      },
+      "id": "55be7dca-1f13-52d3-9050-659b4286c66c",
+      "name": "Section: Write and save the briefs",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ea2c0284-2e4e-5f4d-aa1b-2e6d210edf0e",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "902309d9-c15e-5b57-8ec9-c98726aee526",
+      "position": [
+        140,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "bf775f85-036d-532d-b5da-c4aae3ea4716",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        720
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write content brief",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brief format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write content brief",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Monday at 7am": {
+      "main": [
+        [
+          {
+            "node": "Set report settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set report settings": {
+      "main": [
+        [
+          {
+            "node": "Query Search Console",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Search Console": {
+      "main": [
+        [
+          {
+            "node": "Find striking-distance keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find striking-distance keywords": {
+      "main": [
+        [
+          {
+            "node": "Any opportunities?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any opportunities?": {
+      "main": [
+        [
+          {
+            "node": "Fetch the ranking page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No opportunities this week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch the ranking page": {
+      "main": [
+        [
+          {
+            "node": "Read page content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read page content": {
+      "main": [
+        [
+          {
+            "node": "Write content brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write content brief": {
+      "main": [
+        [
+          {
+            "node": "Prepare brief row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare brief row": {
+      "main": [
+        [
+          {
+            "node": "Save briefs to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
