@@ -1,0 +1,1170 @@
+{
+  "name": "Track daily habits and mood with Telegram buttons, Google Sheets and a weekly Gemini review",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Track daily habits and mood with Telegram buttons, Google Sheets and a weekly Gemini review\n\nA habit tracker you never have to open. Every evening your Telegram bot asks how your day was (mood 1-5) and sends one question per habit with **Done** and **Not today** buttons. Taps are saved to Google Sheets, `/stats` shows your last 7 days with streaks, and every Sunday Gemini writes a short, kind review with one small experiment for next week.\n\n### How it works\n1. **Every evening at 9pm** sends the mood question, reads your `Habits` tab and sends one button message per active habit.\n2. **Receive Telegram update** gets button presses and messages. **Parse the update** decodes each button into a log row with a key `date|habit_id`, so pressing again simply changes the answer.\n3. Answers are upserted into the `Log` tab, the button is acknowledged and the message is edited to show what you chose.\n4. `/stats` reads both tabs and replies with done counts, completion % and current streaks.\n5. **Every Sunday at 7pm** calculates the week, including mood on days you did a habit versus days you did not, and Gemini turns it into a short review.\n\n### Setup\n1. Create a bot with @BotFather; add **Telegram**, **Google Sheets** and **Google Gemini (PaLM) API** credentials.\n2. Create a sheet with `Habits` (`habit_id, habit, emoji, active, target_per_week`) and `Log` (`log_id, date, habit_id, value, logged_at`) tabs.\n3. Each trigger has its own settings node: put the Sheet ID and your chat ID in **Set tracker settings**, **Config** and **Config (Every Sunday at 7pm)**. Activate.\n\n### Customization\n- Change the check-in time, or add habits as new rows; no workflow edits needed.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "91d06e91-7c1e-58a6-8310-0e858ae9053f",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 21
+            }
+          ]
+        }
+      },
+      "id": "4c4a5f44-b5eb-5a1a-bb28-b39806f63580",
+      "name": "Every evening at 9pm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "31489daa-bdd4-586f-aea6-79b684da37c6",
+              "name": "chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "9b73489f-1e83-50e3-a0ea-8883e7ed00d1",
+              "name": "timezone",
+              "value": "Europe/London",
+              "type": "string"
+            },
+            {
+              "id": "10a2b439-620c-5920-b2dc-7ebc5428e1b5",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6777d892-f515-57a5-a4cc-fdd61add9448",
+      "name": "Set tracker settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "=🌙 Evening check-in for {{ $now.setZone($json.timezone).toFormat('cccc d LLL') }}. How was your day?",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "😞 1",
+                    "additionalFields": {
+                      "callback_data": "={{ 'm|' + $now.setZone($json.timezone).toFormat('yyyy-MM-dd') + '|1' }}"
+                    }
+                  },
+                  {
+                    "text": "😕 2",
+                    "additionalFields": {
+                      "callback_data": "={{ 'm|' + $now.setZone($json.timezone).toFormat('yyyy-MM-dd') + '|2' }}"
+                    }
+                  },
+                  {
+                    "text": "😐 3",
+                    "additionalFields": {
+                      "callback_data": "={{ 'm|' + $now.setZone($json.timezone).toFormat('yyyy-MM-dd') + '|3' }}"
+                    }
+                  },
+                  {
+                    "text": "🙂 4",
+                    "additionalFields": {
+                      "callback_data": "={{ 'm|' + $now.setZone($json.timezone).toFormat('yyyy-MM-dd') + '|4' }}"
+                    }
+                  },
+                  {
+                    "text": "😄 5",
+                    "additionalFields": {
+                      "callback_data": "={{ 'm|' + $now.setZone($json.timezone).toFormat('yyyy-MM-dd') + '|5' }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "0888714d-ab12-5bde-b2d4-bee66f0a3de1",
+      "name": "Ask for today's mood",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        380,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set tracker settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Habits"
+        },
+        "options": {}
+      },
+      "id": "75afe932-564e-5095-bba8-48b69302191a",
+      "name": "Read my habits",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        620,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('Set tracker settings').first().json;\nconst d = DateTime.now().setZone(s.timezone).toFormat('yyyy-MM-dd');\nreturn $input.all().map(i => i.json).filter(h => h.habit_id && String(h.active).toLowerCase() !== 'no')\n  .map(h => ({ json: { chat_id: s.chat_id, text: `${h.emoji || '•'} ${h.habit}?`,\n    done: `h|${d}|${String(h.habit_id).slice(0, 30)}|done`, missed: `h|${d}|${String(h.habit_id).slice(0, 30)}|missed`,\n    rest: `h|${d}|${String(h.habit_id).slice(0, 30)}|rest` } }));"
+      },
+      "id": "81dadabc-dbc3-5405-ad53-1bc0d69adec7",
+      "name": "Build habit questions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Done",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.done }}"
+                    }
+                  },
+                  {
+                    "text": "❌ Not today",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.missed }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "46e44225-14c3-5fb0-9562-c78ebac1e0b3",
+      "name": "Send habit questions",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 1. Send the evening check-in",
+        "height": 300,
+        "width": 1420,
+        "color": 7
+      },
+      "id": "70e5db80-1124-58f2-9f50-9b14d8aec4a6",
+      "name": "Section: Send the evening check-in",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "callback_query",
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "8daec58f-5894-5796-9770-6bf726bd9c7c",
+      "name": "Receive Telegram update",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        1400,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "bea75e8a-59ab-5f29-bb26-61a2408f2221"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Buttons: m|date|1-5 (mood) and h|date|habit_id|done/missed/rest. Messages: /stats, /help or (Pro) a journal line.\nconst u = $json;\nconst owner = $('Config').first().json.telegram_chat_id;\nif (u.callback_query) {\n  const q = u.callback_query;\n  const [t, date, a, b] = String(q.data || '').split('|');\n  const base = { chat_id: q.message?.chat?.id, message_id: q.message?.message_id, query_id: q.id, question: q.message?.text || '' };\n  if (t === 'm') return [{ json: { ...base, kind: 'answer', log_id: `${date}|mood`, date, habit_id: 'mood', value: a, label: `Mood ${a}/5` } }];\n  if (t === 'h') return [{ json: { ...base, kind: 'answer', log_id: `${date}|${a}`, date, habit_id: a, value: b,\n    label: { done: '✅ Done', missed: '❌ Not today', rest: '💤 Rest day' }[b] || b } }];\n  return [{ json: { ...base, kind: 'ignore' } }];\n}\nconst m = u.message || {};\nconst text = String(m.text || '').trim();\nconst kind = /^\\/stats\\b/i.test(text) ? 'stats' : (text && !text.startsWith('/') ? 'journal' : 'help');\nreturn [{ json: { kind, chat_id: m.chat?.id, text, allowed: owner === 'YOUR_TELEGRAM_CHAT_ID' || String(m.chat?.id) === owner,\n  date: DateTime.fromSeconds(m.date || Math.floor(Date.now() / 1000)).toFormat('yyyy-MM-dd') } }];"
+      },
+      "id": "c5b7d3c1-85ff-565d-b2f3-10dda034f6ec",
+      "name": "Parse the update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "000e2837-f963-54f9-8507-3d8153dd15ba",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "answer",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "answer"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c721326c-a8d2-548b-9b83-0f79a9f616b1",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "stats",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "stats"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "help"
+        },
+        "looseTypeValidation": true
+      },
+      "id": "9ec3e12d-fe41-51a9-ae80-c9e7106fa481",
+      "name": "Route the update",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d77b3e27-c443-57dc-82a2-576a6bb3c43d",
+              "name": "log_id",
+              "value": "={{ $json.log_id }}",
+              "type": "string"
+            },
+            {
+              "id": "2b301bfb-486d-5f3b-9df2-e0f926d1a7d7",
+              "name": "date",
+              "value": "={{ $json.date }}",
+              "type": "string"
+            },
+            {
+              "id": "a0d09fff-d461-52c9-ad5a-9aaa078796ff",
+              "name": "habit_id",
+              "value": "={{ $json.habit_id }}",
+              "type": "string"
+            },
+            {
+              "id": "73937a5f-1d4f-5c20-9fa7-a83ea10f75e9",
+              "name": "value",
+              "value": "={{ $json.value }}",
+              "type": "string"
+            },
+            {
+              "id": "42015d98-b05f-5448-ba86-3f84cacf6e4f",
+              "name": "logged_at",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "71cb69ac-938f-512a-bdef-b16e8878c6a2",
+      "name": "Prepare log row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2340,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "log_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "cbf16d4a-0420-503a-8349-70c1daaac157",
+      "name": "Save answer to the Log tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2580,
+        -160
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{ $('Parse the update').first().json.query_id }}",
+        "additionalFields": {
+          "text": "=Saved: {{ $('Parse the update').first().json.label }}"
+        }
+      },
+      "id": "29fa62d0-b5c7-5c25-816f-1eae30715fd6",
+      "name": "Confirm the button press",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2820,
+        -160
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Parse the update').first().json.chat_id }}",
+        "messageId": "={{ $('Parse the update').first().json.message_id }}",
+        "text": "={{ $('Parse the update').first().json.question }}  {{ $('Parse the update').first().json.label }}",
+        "additionalFields": {}
+      },
+      "id": "f2f4df3d-73bd-5e92-8606-0e2a9f2995d8",
+      "name": "Show the answer in the chat",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3060,
+        -160
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "I send your habit check-in every evening. Tap the buttons to log it.\n/stats - your last 7 days",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "d83f6401-2410-5c91-8eb0-cad980fb09a8",
+      "name": "Send help",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2340,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Habits"
+        },
+        "options": {}
+      },
+      "id": "5691ab51-7db8-5d60-b73e-f4da5ac4656e",
+      "name": "Read habits for stats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2340,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Log"
+        },
+        "options": {}
+      },
+      "id": "44c21931-c62d-51d3-b4dd-eec983508ac9",
+      "name": "Read log for stats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2580,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Per-habit stats over the last 7 days: done count, completion %, current streak, mood with vs without the habit\nconst tz = 'Europe/London';\nconst today = DateTime.now().setZone(tz).startOf('day');\nconst days = [...Array(7)].map((_, i) => today.minus({ days: i }).toFormat('yyyy-MM-dd'));\nconst habits = $('Read habits for stats').all().map(i => i.json).filter(h => h.habit_id && String(h.active).toLowerCase() !== 'no');\nconst log = $('Read log for stats').all().map(i => i.json).filter(r => r.log_id);\nconst val = (d, id) => { const r = log.find(x => String(x.date) === d && String(x.habit_id) === String(id)); return r ? String(r.value) : ''; };\nconst mood = d => Number(val(d, 'mood')) || null;\nconst avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 10) / 10 : null;\nconst stats = habits.map(h => {\n  const done = days.filter(d => val(d, h.habit_id) === 'done');\n  let streak = 0;\n  for (const d of days) { const v = val(d, h.habit_id); if (v === 'done') streak++; else if (v === 'rest' || (d === days[0] && !v)) continue; else break; }\n  const rest = days.filter(d => val(d, h.habit_id) === 'rest').length;\n  const target = Number(h.target_per_week) || 7;\n  const withH = done.map(mood).filter(Boolean), without = days.filter(d => !done.includes(d) && val(d, h.habit_id) !== 'rest').map(mood).filter(Boolean);\n  const mw = avg(withH), mo = avg(without);\n  // Only call it a pattern with 3+ mood days on each side and a gap of 0.5+ (computed here so the AI never over-reads noise)\n  const pattern = withH.length >= 3 && without.length >= 3 && Math.abs(mw - mo) >= 0.5\n    ? `mood ${mw} on days with \"${h.habit}\" vs ${mo} without` : '';\n  return { habit: `${h.emoji || '•'} ${h.habit}`, done: done.length, of: days.length,\n    pct: Math.round(done.length / Math.max(1, days.length - rest) * 100), rest_days: rest, streak, target_per_week: target,\n    on_target: done.length >= Math.round(target * (days.length - rest) / 7), mood_with: mw, mood_without: mo, pattern };\n});\nconst moods = days.map(mood).filter(Boolean);\nconst text = stats.map(s => `${s.habit}: ${s.done}/${s.of} (${s.pct}%)${s.streak > 1 ? ` · 🔥 ${s.streak}-day streak` : ''}${s.on_target ? ' ✅' : ''}`).join('\\n');\nreturn [{ json: { period_days: days.length, stats, stats_text: text || 'No habits set up yet.',\n  mood_avg: avg(moods), mood_days: moods.length, from: days[days.length - 1], to: days[0] } }];"
+      },
+      "id": "8d246401-2f1b-5eb2-994f-63923174da60",
+      "name": "Calculate 7-day stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2820,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parse the update').first().json.chat_id }}",
+        "text": "=<b>📊 Last 7 days</b>\n{{ $json.stats_text }}\n\nMood average: {{ $json.mood_avg ?? '-' }}/5 ({{ $json.mood_days }} days)",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "00a38302-ae36-52ff-91f9-2cee0fe2b24c",
+      "name": "Send my stats",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3060,
+        100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 2. Record button presses and commands",
+        "height": 760,
+        "width": 1880,
+        "color": 7
+      },
+      "id": "1043e1ac-1c75-57a8-96b1-bd17a3955b52",
+      "name": "Section: Record button presses and commands",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                0
+              ],
+              "triggerAtHour": 19
+            }
+          ]
+        }
+      },
+      "id": "428660e8-3016-52f2-b66c-706d47abe842",
+      "name": "Every Sunday at 7pm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        3360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config (Every Sunday at 7pm)').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Habits"
+        },
+        "options": {}
+      },
+      "id": "700cf439-7e7d-5bff-af46-95c3b551d3b0",
+      "name": "Read habits",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3820,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config (Every Sunday at 7pm)').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Log"
+        },
+        "options": {}
+      },
+      "id": "d0722ecb-469c-5c10-be72-d27b594758a5",
+      "name": "Read the log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        4060,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Per-habit stats over the last 7 days: done count, completion %, current streak, mood with vs without the habit\nconst tz = 'Europe/London';\nconst today = DateTime.now().setZone(tz).startOf('day');\nconst days = [...Array(7)].map((_, i) => today.minus({ days: i }).toFormat('yyyy-MM-dd'));\nconst habits = $('Read habits').all().map(i => i.json).filter(h => h.habit_id && String(h.active).toLowerCase() !== 'no');\nconst log = $('Read the log').all().map(i => i.json).filter(r => r.log_id);\nconst val = (d, id) => { const r = log.find(x => String(x.date) === d && String(x.habit_id) === String(id)); return r ? String(r.value) : ''; };\nconst mood = d => Number(val(d, 'mood')) || null;\nconst avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 10) / 10 : null;\nconst stats = habits.map(h => {\n  const done = days.filter(d => val(d, h.habit_id) === 'done');\n  let streak = 0;\n  for (const d of days) { const v = val(d, h.habit_id); if (v === 'done') streak++; else if (v === 'rest' || (d === days[0] && !v)) continue; else break; }\n  const rest = days.filter(d => val(d, h.habit_id) === 'rest').length;\n  const target = Number(h.target_per_week) || 7;\n  const withH = done.map(mood).filter(Boolean), without = days.filter(d => !done.includes(d) && val(d, h.habit_id) !== 'rest').map(mood).filter(Boolean);\n  const mw = avg(withH), mo = avg(without);\n  // Only call it a pattern with 3+ mood days on each side and a gap of 0.5+ (computed here so the AI never over-reads noise)\n  const pattern = withH.length >= 3 && without.length >= 3 && Math.abs(mw - mo) >= 0.5\n    ? `mood ${mw} on days with \"${h.habit}\" vs ${mo} without` : '';\n  return { habit: `${h.emoji || '•'} ${h.habit}`, done: done.length, of: days.length,\n    pct: Math.round(done.length / Math.max(1, days.length - rest) * 100), rest_days: rest, streak, target_per_week: target,\n    on_target: done.length >= Math.round(target * (days.length - rest) / 7), mood_with: mw, mood_without: mo, pattern };\n});\nconst moods = days.map(mood).filter(Boolean);\nconst text = stats.map(s => `${s.habit}: ${s.done}/${s.of} (${s.pct}%)${s.streak > 1 ? ` · 🔥 ${s.streak}-day streak` : ''}${s.on_target ? ' ✅' : ''}`).join('\\n');\nreturn [{ json: { period_days: days.length, stats, stats_text: text || 'No habits set up yet.',\n  mood_avg: avg(moods), mood_days: moods.length, from: days[days.length - 1], to: days[0] } }];"
+      },
+      "id": "13cce8cc-2e5c-5144-ba89-0454ff4b047b",
+      "name": "Calculate stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a supportive, evidence-based habit coach. Write a weekly review for Telegram (plain text, under 120 words, no markdown).\nStructure: one line celebrating the best result, 2-3 short observations from the numbers, then ONE small experiment for next week.\nOnly talk about the habits listed below and the numbers given; never invent habits, activities or trends. Only mention a habit-mood link if it is listed under \"Mood patterns\", and call it a pattern, not proof. Never mention thresholds, rules or how the numbers were calculated. Never shame, never give medical advice.\n\nPeriod: {{ $json.from }} to {{ $json.to }} ({{ $json.period_days }} days)\nHabits:\n{{ $json.stats.map(s => `${s.habit}: done ${s.done}/${s.of}${s.rest_days ? ' (+' + s.rest_days + ' rest days)' : ''}, streak ${s.streak}, target ${s.target_per_week}/week${s.on_target ? ' (on target)' : ''}`).join('\\n') }}\nMood patterns: {{ $json.stats.map(s => s.pattern).filter(Boolean).join('; ') || 'none' }}\nAverage mood: {{ $json.mood_avg ?? 'not logged' }} over {{ $json.mood_days }} days"
+      },
+      "id": "152df388-8749-5553-8141-09904a500fa4",
+      "name": "Write the review",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        4540,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "id": "d91f2c1d-d2ef-577e-9b4c-bd2d4123bb87",
+      "name": "Gemini 3.5 Flash-Lite (weekly)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        4540,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Config (Every Sunday at 7pm)').first().json.telegram_chat_id }}",
+        "text": "=<b>{{ $('Calculate stats').first().json.period_days === 7 ? '🗓 Your week' : '📅 Your month' }}</b>\n{{ $('Calculate stats').first().json.stats_text }}\n\n{{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "2a71b80a-a977-551a-8108-a4ddc08ad6fa",
+      "name": "Send the review",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4840,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Send the weekly review",
+        "height": 500,
+        "width": 1700,
+        "color": 7
+      },
+      "id": "f39cef13-60d3-510e-a34d-def53c1320bc",
+      "name": "Section: Send the weekly review",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3300,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6acf8c8d-ce7d-5341-9f01-61340f9df37a",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "9e6410a4-ce9e-5ebf-a30b-6d19f3a3c1ef",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "c55565e0-df4b-5c29-a380-99f33a1b34c3",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "71c0cbad-7d27-552b-80d2-d79586e2cff0",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            },
+            {
+              "id": "a47914e7-7d07-5a18-a91e-c9548453167b",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "84ee34d7-1e07-5835-bab5-073b09cfe480",
+      "name": "Config (Every Sunday at 7pm)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        3580,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "3dfd4ff3-c2cc-5950-9c56-154e06ca6439",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Workflow failed\nWorkflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send error alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "id": "4cf1282c-3c08-50ba-bbd7-2f4cee81ea4d",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put the Telegram chat ID in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "ace3cd8f-a9bb-52fb-8977-1ac797373029",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Every evening at 9pm": {
+      "main": [
+        [
+          {
+            "node": "Set tracker settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set tracker settings": {
+      "main": [
+        [
+          {
+            "node": "Ask for today's mood",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask for today's mood": {
+      "main": [
+        [
+          {
+            "node": "Read my habits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read my habits": {
+      "main": [
+        [
+          {
+            "node": "Build habit questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build habit questions": {
+      "main": [
+        [
+          {
+            "node": "Send habit questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse the update": {
+      "main": [
+        [
+          {
+            "node": "Route the update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route the update": {
+      "main": [
+        [
+          {
+            "node": "Prepare log row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read habits for stats",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send help",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare log row": {
+      "main": [
+        [
+          {
+            "node": "Save answer to the Log tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save answer to the Log tab": {
+      "main": [
+        [
+          {
+            "node": "Confirm the button press",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm the button press": {
+      "main": [
+        [
+          {
+            "node": "Show the answer in the chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read habits for stats": {
+      "main": [
+        [
+          {
+            "node": "Read log for stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read log for stats": {
+      "main": [
+        [
+          {
+            "node": "Calculate 7-day stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate 7-day stats": {
+      "main": [
+        [
+          {
+            "node": "Send my stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite (weekly)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write the review",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read habits": {
+      "main": [
+        [
+          {
+            "node": "Read the log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the log": {
+      "main": [
+        [
+          {
+            "node": "Calculate stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate stats": {
+      "main": [
+        [
+          {
+            "node": "Write the review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write the review": {
+      "main": [
+        [
+          {
+            "node": "Send the review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Parse the update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Telegram update": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (Every Sunday at 7pm)": {
+      "main": [
+        [
+          {
+            "node": "Read habits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Sunday at 7pm": {
+      "main": [
+        [
+          {
+            "node": "Config (Every Sunday at 7pm)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Send error alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
