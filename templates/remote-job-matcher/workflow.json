@@ -1,0 +1,735 @@
+{
+  "name": "Score remote job listings against your CV with AI and alert on Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Score remote job listings against your CV with AI and alert on Telegram\n\nTwice a day this workflow pulls fresh remote jobs from three free sources, keeps the ones matching your keywords, has AI score each against your CV from 0 to 100, and sends only strong matches to Telegram with reasons and skill gaps.\n\n### How it works\n1. The Schedule Trigger runs at 9am and 5pm (the job APIs ask for no more than 4 calls a day).\n2. Jobs are fetched in parallel from the Remotive API, the Remote OK API and the We Work Remotely RSS feed. If one source is down, the others still run.\n3. A Code node normalises the three formats, keeps recent jobs matching your keywords, sorts newest first and caps how many get scored.\n4. Jobs already scored in earlier runs are dropped.\n5. Gemini scores each job against your CV and returns JSON: score, one-line verdict, matching and missing skills, and whether the location works for you.\n6. Jobs at or above your `min_score` are sent to Telegram with a link to the original listing. An optional, disabled Google Sheets node can log them.\n\n### Setup\n1. Paste your CV and preferences into **Set your CV and preferences**, then edit `keywords`, `min_score` and `telegram_chat_id`.\n2. Add a **Google Gemini (PaLM) API** credential (free key from aistudio.google.com).\n3. Add a **Telegram** bot credential from @BotFather and message your bot once.\n4. Optional: enable **Log match to Google Sheets**, put the Sheet ID in **Set your CV and preferences** and add a `Matches` tab.\n5. Activate the workflow.\n\n### Customization\n- Raise `max_jobs_per_run` or add more RSS feeds to the merge.\n\nRemotive and Remote OK ask you to credit them and link to their listing, which the alert does.",
+        "height": 960,
+        "width": 560
+      },
+      "id": "0874fa0f-c402-5166-a031-7505e6f2a491",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Your CV and settings",
+        "height": 640,
+        "width": 480,
+        "color": 7
+      },
+      "id": "f023cf85-7455-517b-915c-ed7bfc500d41",
+      "name": "Section: settings",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            },
+            {
+              "triggerAtHour": 17
+            }
+          ]
+        }
+      },
+      "id": "4deb6397-b22f-5dbc-8c63-0677fe338d4b",
+      "name": "Twice a day (9am and 5pm)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4bcc5fe3-1244-5733-bef8-38b21168f299",
+              "name": "cv_text",
+              "value": "Senior Python developer with 7 years' experience. Strong in Python, Django, FastAPI, PostgreSQL, AWS (Lambda, ECS), Docker and REST API design. Some React and TypeScript. Built data pipelines and business automations with n8n and Airflow.\nLooking for: fully remote backend, data or automation roles, senior level, open to candidates in Europe / UK time zones, salary from 70k USD.",
+              "type": "string"
+            },
+            {
+              "id": "5a23967d-277e-5566-85a7-2733066ce583",
+              "name": "keywords",
+              "value": "python, backend, django, fastapi, automation, n8n, data engineer",
+              "type": "string"
+            },
+            {
+              "id": "2c570c1f-a7e8-54dd-b99d-6d47d53fdfae",
+              "name": "min_score",
+              "value": 70,
+              "type": "number"
+            },
+            {
+              "id": "b26e24d0-0a89-572e-b234-36a98fd19e77",
+              "name": "max_age_days",
+              "value": 7,
+              "type": "number"
+            },
+            {
+              "id": "fa7ce829-73f2-54ac-9282-b8e2d92c0ee2",
+              "name": "max_jobs_per_run",
+              "value": 25,
+              "type": "number"
+            },
+            {
+              "id": "74670970-5f41-5ffb-b079-5d4d0293ab6d",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "409915e5-08e1-550e-adaf-baf734c4f0cf",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0e26c1fc-3831-50dc-8a29-67556ecd97a4",
+      "name": "Set your CV and preferences",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        120,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Fetch jobs from free sources",
+        "height": 640,
+        "width": 700,
+        "color": 7
+      },
+      "id": "dfaf1555-f9e8-5d4b-90ad-82735a5eaa9d",
+      "name": "Section: fetch",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        360,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://remotive.com/api/remote-jobs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "300"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fe9529c5-1fca-568e-9d82-d6168434fa16",
+      "name": "Fetch Remotive jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        -60
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://remoteok.com/api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-remote-job-matcher"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e8cec36d-e8d6-5edc-9fbc-6e0e5a782cc2",
+      "name": "Fetch Remote OK jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        420,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://weworkremotely.com/remote-jobs.rss",
+        "options": {
+          "customFields": "region,skills,category,type"
+        }
+      },
+      "id": "c5a1a003-f18b-5e6f-bf33-fdb72f304421",
+      "name": "Fetch We Work Remotely jobs",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        420,
+        260
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "265b2683-6961-5a87-ad02-94a89815fefa",
+      "name": "Wait for all sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalise the three feeds, keep recent jobs whose title or tags match a keyword, newest first, capped per run\nconst s = $('Set your CV and preferences').first().json;\nconst keywords = String(s.keywords || '').toLowerCase().split(',').map(k => k.trim()).filter(Boolean);\nconst maxAgeMs = (Number(s.max_age_days) || 7) * 86400000;\nconst strip = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')\n  .replace(/&#39;|&rsquo;/g, \"'\").replace(/&quot;/g, '\"').replace(/\\s+/g, ' ').trim();\nconst safe = name => { try { return $(name).all().map(i => i.json).filter(j => !j.error); } catch (e) { return []; } };\n\nconst jobs = [];\nfor (const r of safe('Fetch Remotive jobs')) {\n  for (const j of (r.jobs || [])) jobs.push({\n    source: 'Remotive', title: j.title, company: j.company_name, url: j.url,\n    location: j.candidate_required_location, salary: j.salary, tags: [j.category, ...(j.tags || [])].join(', '),\n    published: j.publication_date, description: strip(j.description),\n  });\n}\nfor (const j of safe('Fetch Remote OK jobs')) {\n  if (!j.position) continue; // first element is Remote OK's legal notice\n  const sal = Number(j.salary_min) ? `$${j.salary_min}-${j.salary_max}` : '';\n  jobs.push({\n    source: 'Remote OK', title: j.position, company: j.company, url: j.url, location: j.location,\n    salary: sal, tags: (j.tags || []).join(', '), published: j.date, description: strip(j.description),\n  });\n}\nfor (const j of safe('Fetch We Work Remotely jobs')) {\n  if (!j.link) continue;\n  const [company, ...rest] = String(j.title || '').split(': ');\n  jobs.push({\n    source: 'We Work Remotely', title: rest.join(': ') || j.title, company, url: j.link,\n    location: j.region || '', salary: '', tags: [j.category, j.skills].filter(Boolean).join(', '),\n    published: j.isoDate || j.pubDate, description: strip(j.content || j.contentSnippet),\n  });\n}\n\nconst now = Date.now();\nconst matches = jobs\n  .filter(j => j.url && j.title)\n  .filter(j => { const t = Date.parse(j.published); return isNaN(t) || now - t <= maxAgeMs; })\n  .filter(j => {\n    if (!keywords.length) return true;\n    const hay = `${j.title} ${j.tags}`.toLowerCase(); // title + tags only: descriptions match almost anything\n    return keywords.some(k => hay.includes(k));\n  })\n  .sort((a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0))\n  .slice(0, Number(s.max_jobs_per_run) || 25)\n  .map(j => ({ ...j, description: j.description.slice(0, 3500) }));\n\nreturn matches.map(j => ({ json: j }));"
+      },
+      "id": "a50d4dea-fe98-5746-bfb6-9de999332446",
+      "name": "Normalize and filter jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Score new jobs against your CV",
+        "height": 640,
+        "width": 640,
+        "color": 7
+      },
+      "id": "b29f9622-c5a6-5510-a190-225255167d21",
+      "name": "Section: score",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.url }}",
+        "options": {}
+      },
+      "id": "06414d15-0bcf-5f5e-9544-b165dec6d04e",
+      "name": "Skip jobs already scored",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an experienced technical recruiter. Score how well this remote job matches the candidate's CV and preferences.\n\nCandidate CV and preferences:\n{{ $('Set your CV and preferences').first().json.cv_text }}\n\nJob:\nTitle: {{ $json.title }}\nCompany: {{ $json.company }}\nLocation / time zone: {{ $json.location || 'not stated' }}\nSalary: {{ $json.salary || 'not stated' }}\nTags: {{ $json.tags }}\nDescription: {{ $json.description }}\n\nScoring guide: 90-100 near-perfect fit, 70-89 strong fit worth applying, 50-69 partial fit, below 50 poor fit. Lower the score sharply if the location or time zone rules the candidate out, or if the seniority is clearly wrong.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 4,
+          "delayBetweenBatches": 30000
+        }
+      },
+      "id": "30f6a5cd-6e9e-5559-9f2d-fda129708e66",
+      "name": "Score job against CV",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1380,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "402408a5-ce80-500e-ae63-8376dc62050a",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1360,
+        320
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"score\": 82,\n  \"verdict\": \"Strong backend fit; asks for Go, which the CV lacks.\",\n  \"matching_skills\": [\n    \"Python\",\n    \"PostgreSQL\",\n    \"AWS\"\n  ],\n  \"missing_skills\": [\n    \"Go\"\n  ],\n  \"location_ok\": true\n}"
+      },
+      "id": "3749c8b6-53ce-5c89-908c-c268ae78b5be",
+      "name": "Match score JSON format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. Alert on good matches",
+        "height": 640,
+        "width": 700,
+        "color": 7
+      },
+      "id": "85052653-427d-5b53-b7f9-aff75ed37288",
+      "name": "Section: alert",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c06566bf-d287-5f41-a07c-1a7d99b0ea60",
+              "name": "score",
+              "value": "={{ $json.output.score }}",
+              "type": "number"
+            },
+            {
+              "id": "b37f0525-d250-55c7-adbe-22f90f3bef36",
+              "name": "verdict",
+              "value": "={{ $json.output.verdict }}",
+              "type": "string"
+            },
+            {
+              "id": "c3619de8-2649-5d32-936b-b08991bc29af",
+              "name": "matching_skills",
+              "value": "={{ ($json.output.matching_skills || []).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "d8293169-5a0f-58fd-a25c-01168beff5b7",
+              "name": "missing_skills",
+              "value": "={{ ($json.output.missing_skills || []).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "4d07894c-e7d9-5dc9-ac36-cbaf648061a3",
+              "name": "location_ok",
+              "value": "={{ $json.output.location_ok }}",
+              "type": "boolean"
+            },
+            {
+              "id": "80cd884e-628f-58c4-a13b-f12fedee1a12",
+              "name": "title",
+              "value": "={{ $('Skip jobs already scored').item.json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "891315d4-a5a7-58ed-a42b-3a4bf461befe",
+              "name": "company",
+              "value": "={{ $('Skip jobs already scored').item.json.company }}",
+              "type": "string"
+            },
+            {
+              "id": "905d6a59-1a3f-5861-971a-783a5798c6f7",
+              "name": "location",
+              "value": "={{ $('Skip jobs already scored').item.json.location }}",
+              "type": "string"
+            },
+            {
+              "id": "4547fdcb-eeaa-51d0-8c9b-3019d74737ee",
+              "name": "salary",
+              "value": "={{ $('Skip jobs already scored').item.json.salary }}",
+              "type": "string"
+            },
+            {
+              "id": "7191ccb9-3338-5072-977b-c9ad06f722dd",
+              "name": "source",
+              "value": "={{ $('Skip jobs already scored').item.json.source }}",
+              "type": "string"
+            },
+            {
+              "id": "30f35b4a-a9e5-5740-92c0-f7c3a0a286bf",
+              "name": "url",
+              "value": "={{ $('Skip jobs already scored').item.json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "e90b6b5f-41f3-55aa-9015-10f230a53c65",
+              "name": "found_at",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "eaae822d-5ba9-5d94-a2dc-884a27651d0c",
+      "name": "Attach score to job",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1840,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "35a22e3a-5aa4-59d6-af82-85df0c41c8d2",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": "={{ $('Set your CV and preferences').first().json.min_score }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f2941b42-a622-5b25-895a-471b418599ba",
+      "name": "Keep good matches",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        2060,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set your CV and preferences').first().json.telegram_chat_id }}",
+        "text": "=🎯 {{ $json.score }}/100 · {{ $json.title }} at {{ $json.company }}\n📍 {{ $json.location || 'Location not stated' }}{{ $json.salary ? ' · 💰 ' + $json.salary : '' }}\n\n{{ $json.verdict }}\n✅ {{ $json.matching_skills || '-' }}\n⚠️ Gaps: {{ $json.missing_skills || 'none noted' }}\n\nVia {{ $json.source }}: {{ $json.url }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "3562e98d-ec7f-552a-9197-191489ed7401",
+      "name": "Send job alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2300,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set your CV and preferences').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Matches"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "28288b23-3240-5bc1-9603-b6a1b2e792b0",
+      "name": "Log match to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2300,
+        220
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {},
+      "id": "bf1b9ea2-8e08-509b-a521-67b795855760",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Workflow failed\nWorkflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send error alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "id": "20a32dbf-077a-5a90-8a48-e9ff6d8ad419",
+      "position": [
+        140,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put the Telegram chat ID in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "0577419e-ed60-5fe3-b516-c28fc12f15a1",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        560
+      ]
+    }
+  ],
+  "connections": {
+    "Twice a day (9am and 5pm)": {
+      "main": [
+        [
+          {
+            "node": "Set your CV and preferences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set your CV and preferences": {
+      "main": [
+        [
+          {
+            "node": "Fetch Remotive jobs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Remote OK jobs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch We Work Remotely jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Remotive jobs": {
+      "main": [
+        [
+          {
+            "node": "Wait for all sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Remote OK jobs": {
+      "main": [
+        [
+          {
+            "node": "Wait for all sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Fetch We Work Remotely jobs": {
+      "main": [
+        [
+          {
+            "node": "Wait for all sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Wait for all sources": {
+      "main": [
+        [
+          {
+            "node": "Normalize and filter jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize and filter jobs": {
+      "main": [
+        [
+          {
+            "node": "Skip jobs already scored",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip jobs already scored": {
+      "main": [
+        [
+          {
+            "node": "Score job against CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score job against CV",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match score JSON format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score job against CV",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score job against CV": {
+      "main": [
+        [
+          {
+            "node": "Attach score to job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach score to job": {
+      "main": [
+        [
+          {
+            "node": "Keep good matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep good matches": {
+      "main": [
+        [
+          {
+            "node": "Send job alert to Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log match to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Send error alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
