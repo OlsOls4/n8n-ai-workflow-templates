@@ -1,0 +1,1183 @@
+{
+  "name": "Manage employee leave requests with working-day counts, Google Sheets balances and Gmail approvals",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Manage employee leave requests with working-day counts, Google Sheets balances and Gmail approvals\n\nA complete time-off process for small teams that still handle leave by email and spreadsheets. Employees fill in a hosted form; the workflow counts the real working days (weekends and your country's public holidays removed, half days supported), checks their annual leave balance, and emails their manager one-click Approve / Decline buttons. The decision updates the balance in Google Sheets, logs the request and tells the employee.\n\n### How it works\n1. **Leave request form** collects email, leave type, dates, half day and notes.\n2. **Get public holidays** pulls holidays for the request's years from the free Nager.Date API (no key).\n3. **Look up employee** finds their allowance, days taken and manager in the `Employees` tab.\n4. **Count working days and check balance** validates dates, counts working days and blocks requests that exceed the balance.\n5. **Ask manager to approve** sends a Gmail approval email and waits up to 3 days.\n6. Approved: the balance is updated, the request logged and the employee emailed. Declined or no answer: the employee (or HR) is told.\n\n### Setup\n1. Connect **Google Sheets** and **Gmail** credentials.\n2. Create a sheet with `Employees` and `Requests` tabs (headers in README.md) and put the Sheet ID in **Set leave policy**.\n3. In **Set leave policy** set your country code (GB, US, DE...), optional region (e.g. GB-SCT) and HR email.\n4. Activate and share the form URL with your team.\n\n### Customization\n- Change working days (`1,2,3,4,5` = Mon-Fri) or the 3-day wait.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1060,
+        "width": 600
+      },
+      "id": "1d6c30d6-656c-5841-b55b-420a46ff5734",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Request time off",
+        "formDescription": "Your manager gets an email to approve or decline. You'll hear back by email.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Your work email",
+              "fieldName": "email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Type of leave",
+              "fieldName": "leave_type",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Annual leave"
+                  },
+                  {
+                    "option": "Sick leave"
+                  },
+                  {
+                    "option": "Unpaid leave"
+                  },
+                  {
+                    "option": "Other"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "First day off",
+              "fieldName": "start_date",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Last day off",
+              "fieldName": "end_date",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Half day?",
+              "fieldName": "half_day",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "No"
+                  },
+                  {
+                    "option": "First day is a half day"
+                  },
+                  {
+                    "option": "Last day is a half day"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Reason or handover notes",
+              "fieldName": "reason",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Send request"
+        }
+      },
+      "id": "906fe34d-1abc-56d0-b18c-0909e1684b9e",
+      "name": "Leave request form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "8e232fc0-b371-5e58-9245-f4ddf58bc22e"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4668d442-79c3-5fbc-878c-979a82f931b6",
+              "name": "country_code",
+              "value": "GB",
+              "type": "string"
+            },
+            {
+              "id": "a661a888-1cf8-553c-9b3d-f8503f5f6f16",
+              "name": "holiday_region",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "11ddec41-26fd-5a48-bab6-5f0dce3302b3",
+              "name": "working_days",
+              "value": "1,2,3,4,5",
+              "type": "string"
+            },
+            {
+              "id": "a6bf9728-f62d-550b-baab-96d3961c5f34",
+              "name": "hr_email",
+              "value": "YOUR_HR_EMAIL@example.com",
+              "type": "string"
+            },
+            {
+              "id": "b9221209-5e10-5767-9636-5af940e81ba9",
+              "name": "company_name",
+              "value": "YOUR_COMPANY_NAME",
+              "type": "string"
+            },
+            {
+              "id": "9e1fd76e-509d-5452-90d6-1b11b5f25dda",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e39e7f21-16ce-5531-970d-45d08f88e718",
+      "name": "Set leave policy",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Which years of public holidays do we need? (requests can span New Year)\nconst f = $('Leave request form').first().json;\nconst y1 = Number(String(f.start_date).slice(0, 4)), y2 = Number(String(f.end_date).slice(0, 4));\nconst years = [...new Set([y1, y2].filter(y => y > 2000 && y < 2100))];\nreturn (years.length ? years : [new Date().getFullYear()]).map(year => ({ json: { year } }));"
+      },
+      "id": "8db4eae5-0e64-551b-b08f-cf1fb14646fb",
+      "name": "List holiday years",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://date.nager.at/api/v3/PublicHolidays/{{ $json.year }}/{{ $('Set leave policy').first().json.country_code }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n-workflow/1.0)"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "id": "e52f2a25-75bc-5db4-968b-5787eec7e69a",
+      "name": "Get public holidays",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        620,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set leave policy').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Employees"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "email",
+              "lookupValue": "={{ $('Leave request form').first().json.email.toLowerCase().trim() }}"
+            }
+          ]
+        }
+      },
+      "id": "2536b612-dd26-5d56-87ce-ef28f51b92fd",
+      "name": "Look up employee",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        860,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "content": "## 1. Receive the request",
+        "height": 300,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "34329529-8861-5c15-a580-ddee2851bf10",
+      "name": "Section: Receive the request",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Count working days (weekends and public holidays excluded), validate and check the balance\nconst f = $('Leave request form').first().json;\nconst policy = $('Set leave policy').first().json;\nconst emp = $('Look up employee').first().json || {};\nconst holidayItems = $('Get public holidays').all().map(i => i.json);\nconst region = String(policy.holiday_region || '').trim();\nconst holidays = {};\nfor (const h of holidayItems.flatMap(i => Array.isArray(i.data) ? i.data : (i.date ? [i] : [])))\n  if (!h.counties || (region && h.counties.includes(region))) holidays[h.date] = h.localName || h.name; // national + your region only\nconst holidaysLoaded = Object.keys(holidays).length > 0;\nconst workDays = String(policy.working_days || '1,2,3,4,5').split(',').map(Number); // 1 = Monday\nconst reasons = [];\nconst parse = s => { const m = String(s || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})/); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null; };\nconst start = parse(f.start_date), end = parse(f.end_date);\nconst today = parse($now.toFormat('yyyy-MM-dd'));\nlet days = 0; const skipped = [];\nif (!start || !end) reasons.push('The dates could not be read.');\nelse if (end < start) reasons.push('The last day is before the first day.');\nelse {\n  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {\n    const iso = d.toISOString().slice(0, 10), dow = d.getUTCDay() || 7;\n    if (!workDays.includes(dow)) continue;\n    if (holidays[iso]) { skipped.push(`${iso} ${holidays[iso]}`); continue; }\n    days++;\n  }\n  if (f.half_day !== 'No' && days > 0) days -= 0.5;\n  if (days <= 0) reasons.push('Those dates contain no working days.');\n  const back = f.leave_type === 'Sick leave' ? 14 : 0;\n  if (start < new Date(today.getTime() - back * 864e5)) reasons.push(f.leave_type === 'Sick leave' ? 'Sick leave can only be recorded up to 14 days back.' : 'The first day is in the past.');\n  if ((end - start) / 864e5 > 62) reasons.push('Requests longer than two months need to go to HR directly.');\n}\nif (!emp.email) reasons.push('Your email is not in the employee list. Ask HR to add you.');\nconst allowance = Number(emp.annual_allowance) || 0, taken = Number(emp.days_taken) || 0;\nconst remaining = allowance - taken;\nif (emp.email && f.leave_type === 'Annual leave' && days > remaining) reasons.push(`You have ${remaining} day(s) of annual leave left but asked for ${days}.`);\nconst id = 'LR-' + $now.toFormat('yyyyMMdd-HHmmss');\nreturn [{ json: { request_id: id, submitted: $now.toFormat('yyyy-MM-dd HH:mm'), employee: emp.name || f.email, email: String(f.email).toLowerCase(),\n  team: emp.team || '', manager_email: emp.manager_email || policy.hr_email, leave_type: f.leave_type, start_date: f.start_date, end_date: f.end_date,\n  half_day: f.half_day, working_days: days, reason: f.reason || '', allowance, days_taken: taken, remaining_before: remaining,\n  remaining_after: f.leave_type === 'Annual leave' ? remaining - days : remaining, holidays_skipped: skipped.join(', '),\n  holidays_checked: holidaysLoaded, valid: reasons.length === 0, problems: reasons.join(' ') } }];"
+      },
+      "id": "46163888-3f94-5e34-8b0e-60779c968692",
+      "name": "Count working days and check balance",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "16fdad23-63cd-5a7b-91e6-4813df78ece4",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "7ea30e35-6daa-514a-ac0d-e572d2d537b1",
+      "name": "Is the request valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "=Your leave request needs changes",
+        "emailType": "html",
+        "message": "=<p>Hi {{ $json.employee }},</p><p>We couldn't send your {{ $json.leave_type.toLowerCase() }} request ({{ $json.start_date }} to {{ $json.end_date }}) for approval:</p><p><b>{{ $json.problems }}</b></p><p>Please submit the form again with corrected details.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ff7d29e5-b559-5339-b288-ae4cc49ca195",
+      "name": "Tell employee what is wrong",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1640,
+        220
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 2. Validate the request",
+        "height": 520,
+        "width": 700,
+        "color": 7
+      },
+      "id": "71c15334-13cb-5246-9002-2d063ee6e509",
+      "name": "Section: Validate the request",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "={{ $json.manager_email }}",
+        "subject": "=Leave request: {{ $json.employee }}, {{ $json.start_date }} to {{ $json.end_date }}",
+        "message": "=<p><b>{{ $json.employee }}</b> has asked for <b>{{ $json.working_days }} working day(s)</b> of <b>{{ $json.leave_type.toLowerCase() }}</b>.</p><table cellpadding=\"4\"><tr><td>Dates</td><td>{{ $json.start_date }} to {{ $json.end_date }}{{ $json.half_day !== 'No' ? ' (' + $json.half_day.toLowerCase() + ')' : '' }}</td></tr><tr><td>Annual leave left after this</td><td>{{ $json.remaining_after }} of {{ $json.allowance }}</td></tr><tr><td>Public holidays excluded</td><td>{{ $json.holidays_skipped || 'none' }}</td></tr><tr><td>Reason / handover</td><td>{{ $json.reason || '-' }}</td></tr></table><p>Request {{ $json.request_id }}</p>",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "approveLabel": "Approve",
+            "disapproveLabel": "Decline"
+          }
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": 3,
+              "resumeUnit": "days"
+            }
+          }
+        }
+      },
+      "id": "e118bac8-b62c-571e-83f8-2f43732a1034",
+      "name": "Ask manager to approve",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1940,
+        -80
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "webhookId": "e118bac8-b62c-571e-83f8-2f43732a1034"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f360c705-3561-5fe4-924c-bec6df454bd0",
+              "leftValue": "={{ $json.data?.approved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "2f537a5f-dfa1-5c29-a29b-196d7e5271c8",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2180,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "48c21a5b-65c4-5460-b44d-df28153c074e",
+              "leftValue": "={{ $json.data?.approved === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "04888f26-bd69-590f-aa06-2f82ee99c8f0",
+      "name": "Declined?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2420,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Ask the manager",
+        "height": 460,
+        "width": 700,
+        "color": 7
+      },
+      "id": "3156a3db-e74e-5cfc-801b-1a68cc6ed474",
+      "name": "Section: Ask the manager",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1880,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set leave policy').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Employees"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "email",
+              "lookupValue": "={{ $('Count working days and check balance').first().json.email }}"
+            }
+          ]
+        }
+      },
+      "id": "9fff98e0-f7f6-56c1-91eb-981c48d1557d",
+      "name": "Re-read employee balance",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2720,
+        -200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1ef64851-e901-5be7-97af-fe3eb3558f5f",
+              "name": "email",
+              "value": "={{ $('Count working days and check balance').first().json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "1832f894-7b26-5ac2-8971-5a2745a83968",
+              "name": "days_taken",
+              "value": "={{ (Number($json.days_taken) || 0) + ($('Count working days and check balance').first().json.leave_type === 'Annual leave' ? $('Count working days and check balance').first().json.working_days : 0) }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "962e11cc-5959-5f69-bfe6-bf1088834084",
+      "name": "Prepare balance update",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2960,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set leave policy').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Employees"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "29f40d45-aca0-51f0-b5f6-f7ba010ce49b",
+      "name": "Update leave balance",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3200,
+        -200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "141fbec0-3c55-5732-9314-9940de2a52c9",
+              "name": "request_id",
+              "value": "={{ $('Count working days and check balance').first().json.request_id }}",
+              "type": "string"
+            },
+            {
+              "id": "fcafe0e7-b829-53c6-8e7a-78d9fde43db7",
+              "name": "submitted",
+              "value": "={{ $('Count working days and check balance').first().json.submitted }}",
+              "type": "string"
+            },
+            {
+              "id": "103eeddb-2301-57f1-b3e2-cd1fc085b296",
+              "name": "employee",
+              "value": "={{ $('Count working days and check balance').first().json.employee }}",
+              "type": "string"
+            },
+            {
+              "id": "1ef64851-e901-5be7-97af-fe3eb3558f5f",
+              "name": "email",
+              "value": "={{ $('Count working days and check balance').first().json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "c04c8896-cddd-5568-9d6c-e634699fc1e8",
+              "name": "leave_type",
+              "value": "={{ $('Count working days and check balance').first().json.leave_type }}",
+              "type": "string"
+            },
+            {
+              "id": "a5ad482d-76b9-5970-862f-0a16efd97361",
+              "name": "start_date",
+              "value": "={{ $('Count working days and check balance').first().json.start_date }}",
+              "type": "string"
+            },
+            {
+              "id": "059d0098-085a-57c5-a769-0e200d4ede65",
+              "name": "end_date",
+              "value": "={{ $('Count working days and check balance').first().json.end_date }}",
+              "type": "string"
+            },
+            {
+              "id": "b23acfc3-41ae-588e-a4b1-6cc4c65df34d",
+              "name": "working_days",
+              "value": "={{ $('Count working days and check balance').first().json.working_days }}",
+              "type": "number"
+            },
+            {
+              "id": "572c94c3-9b6d-5f4c-aade-29feb28d5174",
+              "name": "status",
+              "value": "Approved",
+              "type": "string"
+            },
+            {
+              "id": "add41412-9c1f-5368-8057-2fc414fce144",
+              "name": "decided",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm') }}",
+              "type": "string"
+            },
+            {
+              "id": "7f7cb5ae-818c-50e5-b412-ab5a8ab8d0db",
+              "name": "reason",
+              "value": "={{ $('Count working days and check balance').first().json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7adfc969-8c0e-5b46-9aef-e5a3bfdc4364",
+      "name": "Prepare approved log row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        3440,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set leave policy').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Requests"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "36bb32e0-603f-5874-87f4-4ed534328f6c",
+      "name": "Log approved request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3680,
+        -200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Count working days and check balance').first().json.email }}",
+        "subject": "=Approved: your leave from {{ $('Count working days and check balance').first().json.start_date }}",
+        "emailType": "html",
+        "message": "=<p>Hi {{ $('Count working days and check balance').first().json.employee }},</p><p>Your {{ $('Count working days and check balance').first().json.leave_type.toLowerCase() }} from <b>{{ $('Count working days and check balance').first().json.start_date }}</b> to <b>{{ $('Count working days and check balance').first().json.end_date }}</b> ({{ $('Count working days and check balance').first().json.working_days }} working days) has been approved.</p><p>Annual leave remaining: {{ $('Count working days and check balance').first().json.remaining_after }} days.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "2f6d9915-2fdf-57de-9c95-3ce1aa93dbfd",
+      "name": "Email approval to employee",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3920,
+        -200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "141fbec0-3c55-5732-9314-9940de2a52c9",
+              "name": "request_id",
+              "value": "={{ $('Count working days and check balance').first().json.request_id }}",
+              "type": "string"
+            },
+            {
+              "id": "fcafe0e7-b829-53c6-8e7a-78d9fde43db7",
+              "name": "submitted",
+              "value": "={{ $('Count working days and check balance').first().json.submitted }}",
+              "type": "string"
+            },
+            {
+              "id": "103eeddb-2301-57f1-b3e2-cd1fc085b296",
+              "name": "employee",
+              "value": "={{ $('Count working days and check balance').first().json.employee }}",
+              "type": "string"
+            },
+            {
+              "id": "1ef64851-e901-5be7-97af-fe3eb3558f5f",
+              "name": "email",
+              "value": "={{ $('Count working days and check balance').first().json.email }}",
+              "type": "string"
+            },
+            {
+              "id": "c04c8896-cddd-5568-9d6c-e634699fc1e8",
+              "name": "leave_type",
+              "value": "={{ $('Count working days and check balance').first().json.leave_type }}",
+              "type": "string"
+            },
+            {
+              "id": "a5ad482d-76b9-5970-862f-0a16efd97361",
+              "name": "start_date",
+              "value": "={{ $('Count working days and check balance').first().json.start_date }}",
+              "type": "string"
+            },
+            {
+              "id": "059d0098-085a-57c5-a769-0e200d4ede65",
+              "name": "end_date",
+              "value": "={{ $('Count working days and check balance').first().json.end_date }}",
+              "type": "string"
+            },
+            {
+              "id": "b23acfc3-41ae-588e-a4b1-6cc4c65df34d",
+              "name": "working_days",
+              "value": "={{ $('Count working days and check balance').first().json.working_days }}",
+              "type": "number"
+            },
+            {
+              "id": "9f48366b-55bd-5121-a6cc-ab2a11f5c261",
+              "name": "status",
+              "value": "Declined",
+              "type": "string"
+            },
+            {
+              "id": "add41412-9c1f-5368-8057-2fc414fce144",
+              "name": "decided",
+              "value": "={{ $now.toFormat('yyyy-MM-dd HH:mm') }}",
+              "type": "string"
+            },
+            {
+              "id": "7f7cb5ae-818c-50e5-b412-ab5a8ab8d0db",
+              "name": "reason",
+              "value": "={{ $('Count working days and check balance').first().json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5ae1cfab-c020-510d-bf52-6a0f246549f6",
+      "name": "Prepare declined log row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2720,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set leave policy').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Requests"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "05aec7f2-286e-5e17-9b26-e730995a02d2",
+      "name": "Log declined request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2960,
+        60
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Count working days and check balance').first().json.email }}",
+        "subject": "=Your leave request for {{ $('Count working days and check balance').first().json.start_date }} was declined",
+        "emailType": "html",
+        "message": "=<p>Hi {{ $('Count working days and check balance').first().json.employee }},</p><p>Your {{ $('Count working days and check balance').first().json.leave_type.toLowerCase() }} request for {{ $('Count working days and check balance').first().json.start_date }} to {{ $('Count working days and check balance').first().json.end_date }} was declined. Please talk to your manager about alternative dates.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "dc7e815d-8502-5d4e-bedd-e9859a0cd6a2",
+      "name": "Email decline to employee",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3200,
+        60
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Set leave policy').first().json.hr_email }}",
+        "subject": "=No decision on leave request {{ $('Count working days and check balance').first().json.request_id }}",
+        "emailType": "html",
+        "message": "=<p>{{ $('Count working days and check balance').first().json.manager_email }} did not respond within 3 days to {{ $('Count working days and check balance').first().json.employee }}'s request ({{ $('Count working days and check balance').first().json.leave_type }}, {{ $('Count working days and check balance').first().json.start_date }} to {{ $('Count working days and check balance').first().json.end_date }}, {{ $('Count working days and check balance').first().json.working_days }} days). Please follow up.</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "1aabd26d-798c-59a5-82fc-735a54c55f1f",
+      "name": "Email HR about unanswered request",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2720,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Record the decision and notify",
+        "height": 800,
+        "width": 1420,
+        "color": 7
+      },
+      "id": "37bd609d-1747-5509-b94b-61054c6b58f8",
+      "name": "Section: Record the decision and notify",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        -320
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "2ad8a515-cc9a-5512-9e08-7e646ef29e49",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "1e2cff49-b4ec-54cf-83c2-be67461d7034",
+      "position": [
+        140,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "a11e48d7-e64d-5be1-ac43-2f0d2c407a2c",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Leave request form": {
+      "main": [
+        [
+          {
+            "node": "Set leave policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set leave policy": {
+      "main": [
+        [
+          {
+            "node": "List holiday years",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List holiday years": {
+      "main": [
+        [
+          {
+            "node": "Get public holidays",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get public holidays": {
+      "main": [
+        [
+          {
+            "node": "Look up employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Look up employee": {
+      "main": [
+        [
+          {
+            "node": "Count working days and check balance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count working days and check balance": {
+      "main": [
+        [
+          {
+            "node": "Is the request valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is the request valid?": {
+      "main": [
+        [
+          {
+            "node": "Ask manager to approve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tell employee what is wrong",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask manager to approve": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Re-read employee balance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Declined?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-read employee balance": {
+      "main": [
+        [
+          {
+            "node": "Prepare balance update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare balance update": {
+      "main": [
+        [
+          {
+            "node": "Update leave balance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update leave balance": {
+      "main": [
+        [
+          {
+            "node": "Prepare approved log row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare approved log row": {
+      "main": [
+        [
+          {
+            "node": "Log approved request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log approved request": {
+      "main": [
+        [
+          {
+            "node": "Email approval to employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Declined?": {
+      "main": [
+        [
+          {
+            "node": "Prepare declined log row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email HR about unanswered request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare declined log row": {
+      "main": [
+        [
+          {
+            "node": "Log declined request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log declined request": {
+      "main": [
+        [
+          {
+            "node": "Email decline to employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
