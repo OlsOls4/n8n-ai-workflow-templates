@@ -1,0 +1,445 @@
+{
+  "name": "Write product titles, descriptions and tags from photos with Gemini Vision and Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Write product titles, descriptions and tags from photos with Gemini Vision and Google Sheets\n\nTurn a product photo and a few notes into a ready-to-edit listing. Upload the photo through a simple n8n form, pick Etsy, Shopify or another shop, and Gemini Vision writes the title, description, five bullet points, tags, SEO title, meta description and alt text. The draft is checked against marketplace limits and saved to Google Sheets. Nothing is published automatically.\n\n### How it works\n1. **Product photo form** takes one photo, your notes (size, material, price, anything the photo can't show) and the platform.\n2. **Write listing from photo** sends the image and notes to Gemini Vision and returns structured JSON. The prompt forbids inventing details.\n3. **Check listing limits** trims titles (140 characters for Etsy), enforces 13 tags of 20 characters or fewer, and marks the row `REVIEW` or `FIX`.\n4. The listing is appended to Google Sheets and shown on the form's result page.\n\n### Setup\n1. Add a free **Google Gemini (PaLM) API** credential (aistudio.google.com).\n2. Create a Google Sheet with a `Listings` tab and this header row: `created_at, platform, product_notes, photo_filename, title, description, bullet_points, tags, seo_title, meta_description, alt_text, colors, materials, status, issues`.\n3. Put the Sheet ID in **Config** and connect **Google Sheets**.\n4. Activate and open the form's URL.\n\n### Customization\n- Add your brand voice or banned words to the prompt.\n- Change the tag count or title length in **Check listing limits**.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 900,
+        "width": 600
+      },
+      "id": "39f296a0-05a7-56a1-8cdf-c28bcb1c1066",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Create a product listing",
+        "formDescription": "Upload one clear photo and add anything the photo can't show.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Product photo",
+              "fieldName": "photo",
+              "fieldType": "file",
+              "requiredField": true,
+              "multipleFiles": false,
+              "acceptFileTypes": ".jpg,.jpeg,.png,.webp"
+            },
+            {
+              "fieldLabel": "Notes (size, material, price, who it's for)",
+              "fieldName": "product_notes",
+              "fieldType": "textarea"
+            },
+            {
+              "fieldLabel": "Platform",
+              "fieldName": "platform",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Etsy"
+                  },
+                  {
+                    "option": "Shopify"
+                  },
+                  {
+                    "option": "Other"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Tone",
+              "fieldName": "tone",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Warm and friendly"
+                  },
+                  {
+                    "option": "Premium"
+                  },
+                  {
+                    "option": "Playful"
+                  },
+                  {
+                    "option": "Straightforward"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Write my listing"
+        }
+      },
+      "id": "87020392-efef-5950-b027-0ff7a2a1eaf4",
+      "name": "Product photo form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "e8031c18-9f2d-522c-835a-49be76e32176"
+    },
+    {
+      "parameters": {
+        "content": "## 1. Upload the photo",
+        "height": 300,
+        "width": 440,
+        "color": 7
+      },
+      "id": "9966d651-cc54-5469-96a3-741fb05ee74e",
+      "name": "Section: Upload the photo",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert e-commerce copywriter. Write a product listing for the item in the photo.\n\nPlatform: {{ $json.platform }}\nTone: {{ $json.tone || 'Warm and friendly' }}\nSeller's notes (trust these over the photo): {{ $json.product_notes || 'none' }}\n\nRules:\n- Describe only what you can see in the photo or what the seller's notes state. Never invent sizes, materials, certifications or prices.\n- If the photo does not show a product, set is_product to false and leave the other fields empty.\n- title: lead with what the item is, then key attributes; max 140 characters for Etsy, 70 for others.\n- description: 3 short paragraphs (what it is, details and materials, care or use), plain text.\n- bullet_points: exactly 5, each under 15 words.\n- tags: exactly 13 for Etsy (each 20 characters or fewer, lower case, no repeats), otherwise 8.\n- seo_title under 60 characters, meta_description under 155 characters, alt_text under 125 characters.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "imageBinary",
+              "binaryImageDataKey": "photo"
+            }
+          ]
+        }
+      },
+      "id": "fb2fc846-de18-5e7c-b90e-81853c856416",
+      "name": "Write listing from photo",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        420,
+        -80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.8-flash",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "b71ecfc8-87bd-5c38-9aae-8d7d2ffb9af2",
+      "name": "Gemini 3.8 Flash (vision)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        420,
+        140
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"is_product\": true,\n  \"title\": \"Handmade Ceramic Mug, Speckled Blue Glaze, 350 ml Coffee Cup\",\n  \"description\": \"A wheel-thrown stoneware mug with a speckled blue glaze...\",\n  \"bullet_points\": [\n    \"Holds 350 ml\",\n    \"Dishwasher safe\"\n  ],\n  \"tags\": [\n    \"ceramic mug\",\n    \"handmade mug\",\n    \"blue coffee cup\"\n  ],\n  \"seo_title\": \"Handmade Blue Ceramic Mug 350 ml\",\n  \"meta_description\": \"Wheel-thrown speckled blue stoneware mug...\",\n  \"alt_text\": \"Speckled blue ceramic mug on a wooden table\",\n  \"colors\": [\n    \"blue\",\n    \"white\"\n  ],\n  \"materials\": [\n    \"stoneware\"\n  ]\n}"
+      },
+      "id": "1c720783-b0a4-5b27-a4e7-a708a2b5ceec",
+      "name": "Listing format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        560,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Write the listing with Gemini Vision",
+        "height": 500,
+        "width": 340,
+        "color": 7
+      },
+      "id": "91d0a1f1-2c89-5166-be5a-a87a783aba61",
+      "name": "Section: Write the listing with Gemini Vision",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        360,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enforce marketplace limits and flag anything that needs a human look\nreturn $input.all().map((item, i) => {\n  const o = item.json.output || {};\n  const req = $('Product photo form').itemMatching(i).json;\n  const etsy = (req.platform || '').toLowerCase() === 'etsy';\n  const issues = [];\n  let title = (o.title || '').trim();\n  const max = etsy ? 140 : 70;\n  if (title.length > max) { issues.push(`title cut to ${max} chars`); title = title.slice(0, max).replace(/[\\s,]+\\S*$/, ''); }\n  let tags = [...new Set((o.tags || []).map(t => String(t).toLowerCase().trim()).filter(Boolean))];\n  if (etsy) {\n    const long = tags.filter(t => t.length > 20);\n    if (long.length) issues.push(`dropped tags over 20 chars: ${long.join(', ')}`);\n    tags = tags.filter(t => t.length <= 20).slice(0, 13);\n    if (tags.length < 13) issues.push(`only ${tags.length}/13 tags`);\n  }\n  if (!o.is_product) issues.push('photo does not look like a product');\n  return { json: {\n    created_at: $now.toFormat('yyyy-MM-dd HH:mm'), platform: req.platform || '', product_notes: req.product_notes || '',\n    photo_filename: req.photo?.filename || '', title, description: o.description || '',\n    bullet_points: (o.bullet_points || []).join('\\n'), tags: tags.join(', '), seo_title: o.seo_title || '',\n    meta_description: o.meta_description || '', alt_text: o.alt_text || '', colors: (o.colors || []).join(', '),\n    materials: (o.materials || []).join(', '), status: issues.length ? 'FIX' : 'REVIEW', issues: issues.join('; ')\n  } };\n});"
+      },
+      "id": "4bacedce-7b21-5e41-b942-0e044e0e0524",
+      "name": "Check listing limits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Listings"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "7ba861e6-da8c-5bec-9665-49b448aba29e",
+      "name": "Save listing to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1080,
+        -80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ (() => { const e = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;'); const j = $('Check listing limits').first().json;\nreturn `<h3>${e(j.title)}</h3><p><b>Status:</b> ${j.status}${j.issues ? ' – ' + e(j.issues) : ''}</p><p>${e(j.description).replace(/\\n/g,'<br>')}</p>` +\n`<p><b>Bullets</b><br>${e(j.bullet_points).replace(/\\n/g,'<br>')}</p><p><b>Tags</b><br>${e(j.tags)}</p>` +\n`<p><b>SEO title</b> ${e(j.seo_title)}<br><b>Meta</b> ${e(j.meta_description)}<br><b>Alt text</b> ${e(j.alt_text)}</p><p>Saved to your Google Sheet.</p>`; })() }}",
+        "options": {
+          "formTitle": "Your listing draft"
+        }
+      },
+      "id": "321e991f-1164-5cd8-ae3b-4b2173d52364",
+      "name": "Show the listing",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Check, save and show",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "82aa6975-6a16-556c-9264-da2b936c4ec9",
+      "name": "Section: Check, save and show",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        780,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9e6410a4-ce9e-5ebf-a30b-6d19f3a3c1ef",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "01512b0d-b3ca-58d3-80e8-d7891c07a011",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        120,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "4b605ab7-c410-5a4a-8fc7-5b50b2492dbf",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "0d6fb0d8-49c4-5c43-b6ac-3ef234b213d4",
+      "position": [
+        140,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "9d35127d-b4e8-5623-aca9-5b3115ed8b5e",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.8 Flash (vision)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write listing from photo",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listing format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write listing from photo",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write listing from photo": {
+      "main": [
+        [
+          {
+            "node": "Check listing limits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check listing limits": {
+      "main": [
+        [
+          {
+            "node": "Save listing to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save listing to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Show the listing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Write listing from photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Product photo form": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
