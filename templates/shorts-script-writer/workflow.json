@@ -1,0 +1,655 @@
+{
+  "name": "Write YouTube Shorts, TikTok and Reels scripts from a form with Gemini and Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Write YouTube Shorts, TikTok and Reels scripts from a form with Gemini and Google Sheets\n\nTurn a video idea into a timed, ready-to-film short-form script in under a minute. Fill in a simple n8n form, and Gemini writes a beat-by-beat script with three hook options, on-screen text, visuals, caption and hashtags. A Code step then checks it against the length you asked for and the platform's rules, tightens it automatically if it runs long, and saves it to Google Sheets.\n\n### How it works\n1. **Short video brief form** asks for the topic, audience, platform, length, tone and call to action.\n2. **Set channel voice** adds your niche, voice notes, banned words and speaking speed.\n3. **Write short-form script** returns structured JSON: title, 3 hooks, timed beats, caption, hashtags and CTA.\n4. **Check length and platform rules** counts spoken words, estimates seconds, enforces hashtag counts (adds `#shorts` for YouTube) and flags banned words.\n5. If the script is more than 15% too long, **Tighten the script** rewrites it once, and it is checked again.\n6. The script is appended to your `Scripts` sheet and shown on the form's result page.\n\n### Setup\n1. Add a free **Google Gemini (PaLM) API** credential (key from aistudio.google.com).\n2. Create a Google Sheet with a `Scripts` tab and the header row: `created_at, topic, platform, length_seconds, title, hook_1, hook_2, hook_3, script, caption, hashtags, cta, est_seconds, status, issues`.\n3. Put the Sheet ID in **Set channel voice** and connect your **Google Sheets** credential.\n4. Edit **Set channel voice**, activate the workflow and open the form's production URL.\n\n### Customization\n- Change `words_per_second` (2.5 is a natural pace) or the limits at the top of the check node.",
+        "height": 980,
+        "width": 600
+      },
+      "id": "26639b71-c1d6-55cc-9323-cd21108ee37f",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Write a short-form video script",
+        "formDescription": "Describe the video. You get a timed script, three hooks, caption and hashtags.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "What is the video about?",
+              "fieldName": "topic",
+              "fieldType": "textarea",
+              "requiredField": true,
+              "placeholder": "e.g. 3 ways to meal prep for the week in 30 minutes"
+            },
+            {
+              "fieldLabel": "Who is it for?",
+              "fieldName": "audience",
+              "fieldType": "text",
+              "placeholder": "e.g. busy students"
+            },
+            {
+              "fieldLabel": "Platform",
+              "fieldName": "platform",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "YouTube Shorts"
+                  },
+                  {
+                    "option": "TikTok"
+                  },
+                  {
+                    "option": "Instagram Reels"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Length (seconds)",
+              "fieldName": "length_seconds",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "15"
+                  },
+                  {
+                    "option": "30"
+                  },
+                  {
+                    "option": "45"
+                  },
+                  {
+                    "option": "60"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Tone",
+              "fieldName": "tone",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Energetic"
+                  },
+                  {
+                    "option": "Calm and helpful"
+                  },
+                  {
+                    "option": "Funny"
+                  },
+                  {
+                    "option": "Story-driven"
+                  },
+                  {
+                    "option": "Expert"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Call to action",
+              "fieldName": "cta",
+              "fieldType": "text",
+              "placeholder": "e.g. Follow for part two"
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Write my script"
+        }
+      },
+      "id": "3c632452-2746-5e2d-bada-ac2bac0d9890",
+      "name": "Short video brief form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "cfc9a797-cac5-5598-be9e-26df2e126984"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ab7caf9f-4b3a-5dfa-b253-a0116ac6b529",
+              "name": "channel_niche",
+              "value": "Practical productivity and automation tips for busy people",
+              "type": "string"
+            },
+            {
+              "id": "b7cdb8e5-cdd2-5d70-9c80-a2db89183a76",
+              "name": "voice_notes",
+              "value": "Friendly, direct, a little playful. Talk to one person. UK spelling.",
+              "type": "string"
+            },
+            {
+              "id": "dbf271ba-e7d7-572e-97a2-43762dcb5e8d",
+              "name": "banned_words",
+              "value": "game-changer, unlock, delve, hack your life",
+              "type": "string"
+            },
+            {
+              "id": "8a52e28c-2939-5db2-9636-a20ad2e2984c",
+              "name": "words_per_second",
+              "value": 2.5,
+              "type": "number"
+            },
+            {
+              "id": "ff289dc6-acaf-5daf-bba0-bef960fcaefa",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {},
+        "includeOtherFields": true
+      },
+      "id": "9c67078c-8a55-55c8-8fac-2318b583ac33",
+      "name": "Set channel voice",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Collect the brief",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "5db1ee64-c0a2-588a-aa54-0272557bca9b",
+      "name": "Section: Collect the brief",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a top short-form video scriptwriter. Write one {{ $json.platform }} script.\n\nTopic: {{ $json.topic }}\nAudience: {{ $json.audience || 'general' }}\nLength: {{ $json.length_seconds }} seconds\nTone: {{ $json.tone || 'Energetic' }}\nCall to action: {{ $json.cta || 'a natural follow or comment prompt' }}\nChannel niche: {{ $json.channel_niche }}\nVoice: {{ $json.voice_notes }}\n\nWrite for the ear: short sentences, one idea per beat, no filler intros (\"Hey guys\", \"In this video\").\n- Beat 1 (0-3 s) is the hook. It must create curiosity or name a pain in under 12 words.\n- Aim for about {{ Math.round((Number($('Set channel voice').first().json.length_seconds) || 30) * (Number($('Set channel voice').first().json.words_per_second) || 2.5)) }} spoken words in total so it fits {{ $('Set channel voice').first().json.length_seconds }} seconds.\n- on_screen_text is max 6 words per beat. visual says what to film or show.\n- End with the call to action. Give exactly 3 alternative hooks in hooks.\n- hashtags: 3-5 specific ones, no generic #fyp spam.\n- Never invent statistics, prices or quotes. Avoid these words: {{ $('Set channel voice').first().json.banned_words || 'none' }}.",
+        "hasOutputParser": true
+      },
+      "id": "a735cbcd-babf-5cff-8795-43242c9347d6",
+      "name": "Write short-form script",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "2fe4c5aa-0fca-5f97-ae29-d35e5639de43",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"title\": \"3 n8n tricks that save me an hour a day\",\n  \"hooks\": [\n    \"You're wasting an hour a day on this.\",\n    \"Stop copy-pasting between apps.\",\n    \"This one node changed my week.\"\n  ],\n  \"beats\": [\n    {\n      \"time\": \"0-3s\",\n      \"voiceover\": \"You're wasting an hour a day on this.\",\n      \"on_screen_text\": \"1 hour/day?!\",\n      \"visual\": \"Close-up of a messy desktop\"\n    },\n    {\n      \"time\": \"3-12s\",\n      \"voiceover\": \"Trick one: let a schedule pull your reports while you sleep.\",\n      \"on_screen_text\": \"Trick 1: schedules\",\n      \"visual\": \"Screen recording of a schedule trigger\"\n    }\n  ],\n  \"caption\": \"Three automations I use every single day.\",\n  \"hashtags\": [\n    \"#automation\",\n    \"#productivity\",\n    \"#n8n\"\n  ],\n  \"cta\": \"Follow for part two.\"\n}"
+      },
+      "id": "494963e1-951d-535e-8d0b-44e0d8eb6d85",
+      "name": "Script JSON format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        580,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Write the script with AI",
+        "height": 500,
+        "width": 340,
+        "color": 7
+      },
+      "id": "84d8955e-b559-506a-a99d-e12ba2a9cebd",
+      "name": "Section: Write the script with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Platform rules used by the checks (2026 limits; tweak to taste)\nconst RULES = {\n  'YouTube Shorts': { maxSeconds: 180, title: 100, caption: 5000, tagsMin: 1, tagsMax: 5, mustTag: '#shorts' },\n  'TikTok': { maxSeconds: 600, title: 0, caption: 2200, tagsMin: 3, tagsMax: 5, mustTag: '' },\n  'Instagram Reels': { maxSeconds: 180, title: 0, caption: 2200, tagsMin: 3, tagsMax: 5, mustTag: '' },\n};\n// Measure the script: spoken words -> seconds, hook length, hashtags, banned words, caption limits\nconst s = $('Set channel voice').first().json;\nconst items = $input.all();\nreturn items.map((item, i) => {\n  const o = item.json.output || {};\n  const ctx = { topic: $('Set channel voice').first().json.topic, platform: $('Set channel voice').first().json.platform, length_seconds: $('Set channel voice').first().json.length_seconds, tone: $('Set channel voice').first().json.tone, tightened: (() => { try { return $('Tighten the script').all().length > 0; } catch (e) { return false; } })() };\n  const platform = ctx.platform || 'YouTube Shorts';\n  const rule = RULES[platform] || RULES['YouTube Shorts'];\n  const target = Number(ctx.length_seconds) || 30;\n  const wps = Number(s.words_per_second) || 2.5;\n  const beats = Array.isArray(o.beats) ? o.beats : [];\n  const spoken = beats.map(b => b.voiceover || '').join(' ');\n  const words = spoken.split(/\\s+/).filter(Boolean).length;\n  const seconds = Math.round(words / wps);\n  let tags = (o.hashtags || []).map(t => '#' + String(t).replace(/^#+/, '').replace(/\\s+/g, '')).filter(t => t.length > 1);\n  if (rule.mustTag && !tags.map(t => t.toLowerCase()).includes(rule.mustTag)) tags.unshift(rule.mustTag);\n  tags = [...new Set(tags)].slice(0, rule.tagsMax);\n  const banned = String(s.banned_words || '').split(',').map(b => b.trim().toLowerCase()).filter(Boolean);\n  const text = `${o.title} ${spoken} ${o.caption}`.toLowerCase();\n  const hit = banned.filter(b => text.includes(b));\n  const issues = [];\n  if (seconds > target * 1.15) issues.push(`about ${seconds}s spoken, target ${target}s`);\n  if (seconds > rule.maxSeconds) issues.push(`over the ${rule.maxSeconds}s platform limit`);\n  const hook = (o.hooks || [])[0] || (beats[0] || {}).voiceover || '';\n  if (hook.split(/\\s+/).length > 14) issues.push('hook longer than 14 words');\n  if (tags.length < rule.tagsMin) issues.push(`only ${tags.length} hashtags`);\n  if (rule.title && String(o.title || '').length > rule.title) issues.push(`title over ${rule.title} characters`);\n  if (String(o.caption || '').length > rule.caption) issues.push(`caption over ${rule.caption} characters`);\n  if (hit.length) issues.push('banned words: ' + hit.join(', '));\n  const tooLong = seconds > target * 1.15;\n  const script = beats.map(b => `[${b.time}] ${b.voiceover}\\n   On screen: ${b.on_screen_text || '-'}\\n   Visual: ${b.visual || '-'}`).join('\\n');\n  return { json: {\n    ...ctx, title: o.title || '', hook_1: (o.hooks || [])[0] || '', hook_2: (o.hooks || [])[1] || '', hook_3: (o.hooks || [])[2] || '',\n    script, beats_json: JSON.stringify(beats), caption: o.caption || '', hashtags: tags.join(' '), cta: o.cta || '',\n    spoken_words: words, est_seconds: seconds, target_seconds: target,\n    too_long: tooLong, issues: issues.join('; '), status: issues.length ? 'REVIEW' : 'READY',\n    created_at: $now.toFormat('yyyy-MM-dd HH:mm'),\n  } };\n});"
+      },
+      "id": "154de942-ac3c-52e6-917c-17f56dfcd055",
+      "name": "Check length and platform rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6d04ca53-e853-5ad3-9dcd-480e0dd62255",
+              "leftValue": "={{ $json.too_long }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "12a387a9-4dc7-5a09-8b88-c7a47bd99b57",
+              "leftValue": "={{ $json.tightened }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "444ae247-aa76-577b-9c49-09717b056335",
+      "name": "Too long and not tightened yet?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=This short-form script is too long. It is about {{ $json.est_seconds }} seconds when spoken, but it must fit {{ $json.target_seconds }} seconds (about {{ Math.round($json.target_seconds * (Number($('Set channel voice').first().json.words_per_second) || 2.5)) }} spoken words in total).\n\nCut words, merge beats and keep the strongest hook and the call to action. Keep the same JSON structure, the same three hooks (shorten them if needed), caption and hashtags.\n\nCurrent script:\n{{ $json.beats_json }}\nTitle: {{ $json.title }}\nHooks: {{ $json.hook_1 }} | {{ $json.hook_2 }} | {{ $json.hook_3 }}\nCaption: {{ $json.caption }}\nHashtags: {{ $json.hashtags }}\nCTA: {{ $json.cta }}",
+        "hasOutputParser": true
+      },
+      "id": "6350cd64-5e96-5683-a367-1966fd01332a",
+      "name": "Tighten the script",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1340,
+        160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "253639bc-c9ee-5437-a541-420bbead04c6",
+      "name": "Gemini 3.5 Flash-Lite (editor)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1340,
+        380
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"title\": \"3 n8n tricks that save me an hour a day\",\n  \"hooks\": [\n    \"You're wasting an hour a day on this.\",\n    \"Stop copy-pasting between apps.\",\n    \"This one node changed my week.\"\n  ],\n  \"beats\": [\n    {\n      \"time\": \"0-3s\",\n      \"voiceover\": \"You're wasting an hour a day on this.\",\n      \"on_screen_text\": \"1 hour/day?!\",\n      \"visual\": \"Close-up of a messy desktop\"\n    },\n    {\n      \"time\": \"3-12s\",\n      \"voiceover\": \"Trick one: let a schedule pull your reports while you sleep.\",\n      \"on_screen_text\": \"Trick 1: schedules\",\n      \"visual\": \"Screen recording of a schedule trigger\"\n    }\n  ],\n  \"caption\": \"Three automations I use every single day.\",\n  \"hashtags\": [\n    \"#automation\",\n    \"#productivity\",\n    \"#n8n\"\n  ],\n  \"cta\": \"Follow for part two.\"\n}"
+      },
+      "id": "3354f8bc-5e3b-55ac-8435-4b60d4186801",
+      "name": "Tightened script JSON",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1480,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Check length and platform rules",
+        "height": 660,
+        "width": 820,
+        "color": 7
+      },
+      "id": "7dfdcae8-03ab-58b3-879f-7fb8fe32ba2d",
+      "name": "Section: Check length and platform rules",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set channel voice').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Scripts"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "7bd7e8e9-d13c-5c14-864d-cc337825cbd4",
+      "name": "Save script to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1760,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "=<h2>{{ $('Check length and platform rules').last().json.title }}</h2>\n<p><b>{{ $('Check length and platform rules').last().json.platform }}</b> · about {{ $('Check length and platform rules').last().json.est_seconds }}s spoken · status: {{ $('Check length and platform rules').last().json.status }} {{ $('Check length and platform rules').last().json.issues }}</p>\n<h3>Hooks</h3><ol><li>{{ $('Check length and platform rules').last().json.hook_1 }}</li><li>{{ $('Check length and platform rules').last().json.hook_2 }}</li><li>{{ $('Check length and platform rules').last().json.hook_3 }}</li></ol>\n<h3>Script</h3><pre style=\"white-space:pre-wrap\">{{ $('Check length and platform rules').last().json.script }}</pre>\n<h3>Caption</h3><p>{{ $('Check length and platform rules').last().json.caption }}<br>{{ $('Check length and platform rules').last().json.hashtags }}</p>\n<p>Saved to your Scripts sheet.</p>",
+        "options": {
+          "formTitle": "Your script"
+        }
+      },
+      "id": "b907551e-10d3-53a0-9138-23ad6ea3fc3d",
+      "name": "Show the script",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. Save and show the script",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "c6e66234-3aa9-5ca5-bcbd-52209481b71c",
+      "name": "Section: Save and show the script",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "68d4d7cc-7e42-51ca-915e-3c7e5783ca9e",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "2bfdb975-8a88-50e4-adc6-bc0c5aa02580",
+      "position": [
+        140,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "9fb6387d-6062-5d6e-b23f-b7c343a66912",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        620
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write short-form script",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script JSON format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write short-form script",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite (editor)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Tighten the script",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tightened script JSON": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Tighten the script",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Short video brief form": {
+      "main": [
+        [
+          {
+            "node": "Set channel voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set channel voice": {
+      "main": [
+        [
+          {
+            "node": "Write short-form script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write short-form script": {
+      "main": [
+        [
+          {
+            "node": "Check length and platform rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check length and platform rules": {
+      "main": [
+        [
+          {
+            "node": "Too long and not tightened yet?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Too long and not tightened yet?": {
+      "main": [
+        [
+          {
+            "node": "Tighten the script",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save script to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tighten the script": {
+      "main": [
+        [
+          {
+            "node": "Check length and platform rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save script to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Show the script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
