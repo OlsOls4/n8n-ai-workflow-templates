@@ -1,0 +1,678 @@
+{
+  "name": "Find trending video ideas for your niche from Google Trends and YouTube with Gemini and Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Find trending video ideas for your niche from Google Trends and YouTube with Gemini and Telegram\n\nWake up to a short list of video ideas that fit your niche and are timely today. Each morning the workflow reads Google Trends' daily trending searches for your country and the latest uploads from channels you watch, and Gemini picks only the ideas that match your niche and audience, with a hook, an angle and why now. Ideas are logged to Google Sheets and sent to Telegram. No API keys except Gemini: both sources are free public RSS feeds.\n\n### How it works\n1. **Set radar settings** holds your niche, audience, country code, channel IDs to watch, relevance bar and Telegram chat.\n2. Google Trends' RSS (`trends.google.com/trending/rss?geo=GB`) and each channel's YouTube RSS feed are read in parallel. A broken feed is skipped.\n3. **Collect signals** turns both into short text; uploads older than the lookback window are dropped.\n4. **Pick video ideas** asks Gemini for structured ideas scored 1-10 for relevance, and **Rank ideas** keeps the best.\n5. Ideas suggested on earlier days are skipped, new ones are appended to the `Ideas` sheet and sent as one Telegram digest.\n\n### Setup\n1. Add **Google Gemini (PaLM) API**, **Google Sheets** and **Telegram** credentials.\n2. Create a sheet with an `Ideas` tab: `idea_id, found_on, topic, hook, format, angle, why_now, source, relevance, urgency, audience, status`.\n3. In **Set radar settings**, add the Sheet ID and your channel IDs (they start with `UC`).\n4. Activate the workflow.\n\n### Customization\n- Raise `min_relevance` for fewer, sharper ideas, or change `geo` to any country code.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 980,
+        "width": 600
+      },
+      "id": "11680eda-1db4-5df5-a076-27324f8e49cb",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "3dd2c3d3-5f07-5ab3-bce9-1c5901033f46",
+      "name": "Every morning at 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a17e7416-08e1-583c-824a-6db432de8f85",
+              "name": "niche",
+              "value": "Budget travel and slow travel in Europe",
+              "type": "string"
+            },
+            {
+              "id": "aa1697bc-bfd1-57b8-94d4-09ef91fe580b",
+              "name": "audience",
+              "value": "UK 20-35 year olds who travel on a budget",
+              "type": "string"
+            },
+            {
+              "id": "b6394958-8cea-56c4-93bf-c5683976748a",
+              "name": "geo",
+              "value": "GB",
+              "type": "string"
+            },
+            {
+              "id": "006583da-c2d9-5ea3-b0a2-802f4ce81d03",
+              "name": "competitor_channel_ids",
+              "value": "=[\"UCsBjURrPoezykLs9EqgamOA\", \"UC_x5XG1OV2P6uZZ5FSM9Ttw\"]",
+              "type": "array"
+            },
+            {
+              "id": "db05a324-2e06-56fd-ac4f-bb9456370150",
+              "name": "lookback_hours",
+              "value": 72,
+              "type": "number"
+            },
+            {
+              "id": "4837a970-7ea7-5108-b1d8-6d0094818a38",
+              "name": "min_relevance",
+              "value": 6,
+              "type": "number"
+            },
+            {
+              "id": "11e23059-715a-5718-a129-6b8410e15b63",
+              "name": "max_ideas",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "d453bda1-2683-5ebf-b695-9a3d0f4aa819",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "82f5b941-204a-5b1f-aa57-5b2b30d5fbea",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7dbfedd9-116e-5e94-b5cf-0df4337913a9",
+      "name": "Set radar settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Your niche and sources",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "2565e957-c20b-5e45-8536-85f0cb346cf4",
+      "name": "Section: Your niche and sources",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://trends.google.com/trending/rss?geo={{ $json.geo }}",
+        "options": {
+          "customFields": "ht:approx_traffic,ht:news_item_title,ht:news_item_url"
+        }
+      },
+      "id": "736ae468-9acf-58ba-bae5-e7cb23252eac",
+      "name": "Read Google Trends daily feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        -100
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "competitor_channel_ids",
+        "options": {
+          "destinationFieldName": "channel_id"
+        }
+      },
+      "id": "f833515e-5988-5ab8-bf79-c8c907afbf99",
+      "name": "One item per channel",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.youtube.com/feeds/videos.xml?channel_id={{ $json.channel_id }}",
+        "options": {}
+      },
+      "id": "1292650c-01a1-5f1b-a80e-771d6d92f4d8",
+      "name": "Read competitor uploads",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        680,
+        120
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {},
+      "id": "0c50916a-ad44-5536-be50-ed59ff4c527b",
+      "name": "Wait for both sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge Google Trends and competitor uploads into prompt-ready text. Broken feeds are skipped.\nconst s = $('Set radar settings').first().json;\nconst safe = n => { try { return $(n).all().map(i => i.json).filter(j => !j.error); } catch (e) { return []; } };\nconst trends = safe('Read Google Trends daily feed').filter(t => t.title).slice(0, 25).map(t => {\n  const news = [].concat(t['ht:news_item_title'] || []).slice(0, 2).join(' | ');\n  return `- ${t.title} (${t['ht:approx_traffic'] || '?'} searches)${news ? ': ' + news : ''}`;\n});\nconst since = Date.now() - (Number(s.lookback_hours) || 72) * 3600e3;\nconst uploads = safe('Read competitor uploads').filter(v => v.link && Date.parse(v.isoDate || v.pubDate) >= since).slice(0, 25)\n  .map(v => `- ${v.author || 'channel'}: ${v.title}`);\nreturn [{ json: { ...s, trends_text: trends.join('\\n'), competitor_text: uploads.join('\\n'),\n  trend_count: trends.length, upload_count: uploads.length } }];"
+      },
+      "id": "0ac84ed6-6728-5ce8-80a3-4c3a24245e80",
+      "name": "Collect signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b313011d-d552-5038-9f42-fa2d6532a1ea",
+              "leftValue": "={{ $json.trend_count + $json.upload_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "4eecdd37-4114-5d82-ad81-218f49b0cbab",
+      "name": "Any signals today?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Read trends and competitor uploads",
+        "height": 520,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "2898f1b8-3f73-5888-a5dd-3b14a2545439",
+      "name": "Section: Read trends and competitor uploads",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a content strategist for a creator. From today's signals, pick up to {{ $json.max_ideas }} video ideas that genuinely fit the niche. Skip trends that do not fit; it is fine to return fewer ideas. Never invent facts about a trend; only use what the signals say.\n\nNiche: {{ $json.niche }}\nAudience: {{ $json.audience }}\n\nTrending searches ({{ $json.geo }}):\n{{ $json.trends_text || 'none' }}\n\nNew uploads from channels I watch (last {{ $json.lookback_hours }} hours):\n{{ $json.competitor_text || 'none' }}\n\nFor each idea: topic (a specific video title), hook (first line spoken, under 15 words), format (short or long), angle (what makes my take different), why_now (one line citing the signal), source (which signal it came from), relevance 1-10 for my niche and audience, urgency (today, this week or evergreen).",
+        "hasOutputParser": true
+      },
+      "id": "ed651027-a1aa-5fbc-b78f-9f9a9a4c1ee6",
+      "name": "Pick video ideas",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1700,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "id": "328f8cc7-82b4-5084-b402-8b3258294958",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"ideas\": [\n    {\n      \"topic\": \"Why everyone is talking about the new UK energy price cap\",\n      \"hook\": \"Your energy bill changes next month. Here's the 30-second version.\",\n      \"format\": \"short\",\n      \"angle\": \"Explain what changes for a typical flat in plain numbers\",\n      \"why_now\": \"Trending in GB with 200K+ searches today\",\n      \"source\": \"Google Trends: energy price cap\",\n      \"relevance\": 8,\n      \"urgency\": \"today\"\n    }\n  ]\n}"
+      },
+      "id": "fbc242a9-577a-58bc-a2b4-03462da3cbe8",
+      "name": "Ideas JSON format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1840,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep ideas above the relevance bar, rank by relevance and urgency, cap the list\nconst s = $('Set radar settings').first().json;\nconst w = { today: 3, 'this week': 2, evergreen: 1 };\nconst ideas = ($json.output?.ideas || [])\n  .filter(i => i.topic && Number(i.relevance) >= (Number(s.min_relevance) || 6))\n  .map(i => ({ ...i, relevance: Number(i.relevance), score: Number(i.relevance) * 10 + (w[i.urgency] || 1) * 5 }))\n  .sort((a, b) => b.score - a.score).slice(0, Number(s.max_ideas) || 5);\nconst key = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();\nreturn ideas.map(i => ({ json: { idea_id: 'tr-' + key(i.topic).split(' ').slice(0, 8).join('-'), found_on: $now.toFormat('yyyy-MM-dd'),\n  topic: i.topic, hook: i.hook, format: i.format, angle: i.angle, why_now: i.why_now, source: i.source,\n  relevance: i.relevance, urgency: i.urgency, audience: s.audience, status: 'new' } }));"
+      },
+      "id": "eef058fe-df10-5f87-992c-fbca21e19047",
+      "name": "Rank ideas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.idea_id }}",
+        "options": {}
+      },
+      "id": "d1f631fd-b36a-518b-b33e-94f6424d8eeb",
+      "name": "Skip ideas already suggested",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Pick and rank ideas with AI",
+        "height": 500,
+        "width": 760,
+        "color": 7
+      },
+      "id": "e4e6a841-d925-5494-8f8f-926cbf606ab0",
+      "name": "Section: Pick and rank ideas with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set radar settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Ideas"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "ba5d86c2-ad97-5a8f-85fa-734e29918fd0",
+      "name": "Log ideas to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2540,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst ideas = $('Skip ideas already suggested').all().map(i => i.json);\nconst icon = { today: '🔥', 'this week': '📅', evergreen: '🌱' };\nlet text = `<b>💡 ${ideas.length} video idea${ideas.length === 1 ? '' : 's'} for today</b>\\n\\n`;\nideas.forEach((i, n) => { text += `${n + 1}. ${icon[i.urgency] || '•'} <b>${esc(i.topic)}</b> (${esc(i.format)}, ${i.relevance}/10)\\n🎣 ${esc(i.hook)}\\n📈 ${esc(i.why_now)}\\n\\n`; });\nreturn [{ json: { text: text.slice(0, 4000) } }];"
+      },
+      "id": "2a6d2d5f-b0e8-5d95-98a7-4f85ea8a0d5e",
+      "name": "Build idea digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2780,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set radar settings').first().json.telegram_chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "dc3f0739-e120-5c2b-8d19-1d1517f5d27b",
+      "name": "Send ideas to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3020,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Log and send the digest",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "e0c53ba4-0c80-5e4b-9e97-ce2b432b9b6d",
+      "name": "Section: Log and send the digest",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2480,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "1ad32bf8-e56a-5268-93c5-a1debcf9b2ac",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Workflow failed\nWorkflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send error alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "id": "4ddc7146-9e0b-51e7-bad9-f86689bc3cb6",
+      "position": [
+        140,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put the Telegram chat ID in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "42c092d7-d552-5f10-9d18-91298b9aeec4",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        620
+      ]
+    }
+  ],
+  "connections": {
+    "Every morning at 8am": {
+      "main": [
+        [
+          {
+            "node": "Set radar settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set radar settings": {
+      "main": [
+        [
+          {
+            "node": "Read Google Trends daily feed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "One item per channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per channel": {
+      "main": [
+        [
+          {
+            "node": "Read competitor uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Google Trends daily feed": {
+      "main": [
+        [
+          {
+            "node": "Wait for both sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read competitor uploads": {
+      "main": [
+        [
+          {
+            "node": "Wait for both sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Wait for both sources": {
+      "main": [
+        [
+          {
+            "node": "Collect signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect signals": {
+      "main": [
+        [
+          {
+            "node": "Any signals today?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pick video ideas",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ideas JSON format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Pick video ideas",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any signals today?": {
+      "main": [
+        [
+          {
+            "node": "Pick video ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick video ideas": {
+      "main": [
+        [
+          {
+            "node": "Rank ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank ideas": {
+      "main": [
+        [
+          {
+            "node": "Skip ideas already suggested",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip ideas already suggested": {
+      "main": [
+        [
+          {
+            "node": "Log ideas to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log ideas to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Build idea digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build idea digest": {
+      "main": [
+        [
+          {
+            "node": "Send ideas to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Send error alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
