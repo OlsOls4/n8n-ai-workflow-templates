@@ -1,0 +1,662 @@
+{
+  "name": "Send birthday reminders with Gemini gift ideas and message drafts from Google Sheets to Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Send birthday reminders with Gemini gift ideas and message drafts from Google Sheets to Telegram\n\nNever miss a birthday or panic-buy a gift again. Keep a simple `People` sheet with names, birthdays, interests and budgets. Each morning the workflow checks who has a birthday coming up, sends five tailored gift ideas to Telegram 14 and 3 days before (with shop search links), and on the day sends a ready-to-send message in your style.\n\n### How it works\n1. **Every morning at 8am** reads your `People` tab.\n2. **Find upcoming birthdays** understands `1990-05-17`, `17/05/1990`, `17/05` and `05-17`, handles 29 February, works out the next birthday, the age if the year is known, and keeps people at one of your `lead_days` (default 14, 3 and 0).\n3. Reminders already sent are skipped, so running twice a day never double-messages.\n4. For upcoming birthdays Gemini suggests five gifts within budget, avoiding past gifts, plus a card line. Each idea gets a Google Shopping search link.\n5. On the day Gemini drafts a 2-4 sentence message and a one-liner.\n\n### Setup\n1. Add **Google Sheets**, **Telegram** and **Google Gemini (PaLM) API** credentials.\n2. Create a `People` tab: `name, relationship, birthday, interests, budget, notes, last_gift` and put the Sheet ID in **Set reminder settings**.\n3. Fill in **Set reminder settings** (chat ID, your name, message style, lead days) and activate.\n\n### Customization\n- Use any lead days, e.g. `30,7,1,0`, or set budgets per person.\n- Add an `occasion` column for anniversaries; the prompts adapt.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 960,
+        "width": 600
+      },
+      "id": "a25d9c74-ac5e-57ab-b99e-2228b67b8d48",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "330bf387-814f-57aa-8f57-bcfc1e688514",
+      "name": "Every morning at 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3404cb08-ee6f-5e9c-b206-ad7355ab506a",
+              "name": "lead_days",
+              "value": "14,3,0",
+              "type": "string"
+            },
+            {
+              "id": "92be5e34-df74-5279-992b-b2375e93230c",
+              "name": "default_budget",
+              "value": "£30",
+              "type": "string"
+            },
+            {
+              "id": "9b73489f-1e83-50e3-a0ea-8883e7ed00d1",
+              "name": "timezone",
+              "value": "Europe/London",
+              "type": "string"
+            },
+            {
+              "id": "d453bda1-2683-5ebf-b695-9a3d0f4aa819",
+              "name": "telegram_chat_id",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "bd190d60-2ae9-5e60-97f8-6937887d29b0",
+              "name": "my_name",
+              "value": "Alex",
+              "type": "string"
+            },
+            {
+              "id": "a8d63067-473c-50bf-9ff9-0b5ade1c493d",
+              "name": "message_style",
+              "value": "Warm, a little funny, short",
+              "type": "string"
+            },
+            {
+              "id": "a5183465-58f3-518a-9a24-e22a18049446",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0bacf2af-1345-526d-9ede-dc9c216fbd6a",
+      "name": "Set reminder settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set reminder settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "People"
+        },
+        "options": {}
+      },
+      "id": "c34b4be1-9918-5e29-8b1e-5700a8781507",
+      "name": "Read people",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        380,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse birthdays (YYYY-MM-DD, DD/MM/YYYY, DD/MM, MM-DD), find the next occurrence and keep the ones at a reminder lead time\nconst s = $('Set reminder settings').first().json;\nconst tz = s.timezone || 'Europe/London';\nconst leads = String(s.lead_days || '14,3,0').split(',').map(n => Number(n.trim())).filter(n => !isNaN(n));\nconst today = DateTime.now().setZone(tz).startOf('day');\nconst parse = v => {\n  const t = String(v || '').trim(); let m;\n  if ((m = t.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})$/))) return { y: +m[1], mo: +m[2], d: +m[3] };\n  if ((m = t.match(/^(\\d{1,2})[\\/.](\\d{1,2})(?:[\\/.](\\d{4}))?$/))) return { y: m[3] ? +m[3] : null, mo: +m[2], d: +m[1] };\n  if ((m = t.match(/^(\\d{1,2})-(\\d{1,2})$/))) return { y: null, mo: +m[1], d: +m[2] };\n  return null;\n};\nconst next = (mo, d) => {\n  for (const y of [today.year, today.year + 1]) {\n    let dt = DateTime.fromObject({ year: y, month: mo, day: d }, { zone: tz });\n    if (!dt.isValid && mo === 2 && d === 29) dt = DateTime.fromObject({ year: y, month: 2, day: 28 }, { zone: tz });\n    if (dt.isValid && dt >= today) return dt;\n  }\n  return null;\n};\nconst out = [];\nfor (const p of $input.all().map(i => i.json)) {\n  const name = p.name || p.displayName; const b = parse(p.birthday || p.date);\n  if (!name || !b) continue;\n  const when = next(b.mo, b.d); if (!when) continue;\n  const days = Math.round(when.diff(today, 'days').days);\n  if (!leads.includes(days)) continue;\n  out.push({ json: { name, relationship: p.relationship || '', interests: p.interests || '', budget: p.budget || s.default_budget,\n    notes: p.notes || '', last_gift: p.last_gift || '', email: p.email || '', occasion: p.occasion || 'birthday',\n    date: when.toFormat('cccc d LLLL'), days_until: days, turning: b.y ? when.year - b.y : null,\n    stage: days === 0 ? 'today' : 'gift', key: `${name}|${when.toISODate()}|${days}` } });\n}\nreturn out;"
+      },
+      "id": "ee7b88f6-d7b0-5d41-b772-f343496eb128",
+      "name": "Find upcoming birthdays",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.key }}",
+        "options": {}
+      },
+      "id": "376a5a99-400c-57b0-bab1-eed2db8c8f1f",
+      "name": "Skip reminders already sent",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c5d21f7d-f615-5841-b711-04f0ce0e163c",
+                    "leftValue": "={{ $json.stage }}",
+                    "rightValue": "gift",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "gift ideas"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "2dcdc780-0d42-5896-aaea-0b8ba7762323",
+                    "leftValue": "={{ $json.stage }}",
+                    "rightValue": "today",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "today"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "other"
+        },
+        "looseTypeValidation": true
+      },
+      "id": "73c696e8-e925-5b05-8b62-af0dab3b4e93",
+      "name": "Gift reminder or birthday today?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Find birthdays coming up",
+        "height": 300,
+        "width": 1420,
+        "color": 7
+      },
+      "id": "bee9a1f0-d69a-5dab-8ac2-8481b0c1ab22",
+      "name": "Section: Find birthdays coming up",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Suggest 5 thoughtful  gift ideas for {{ $json.name }} ({{ $json.relationship || 'friend' }}){{ $json.turning ? ', turning ' + $json.turning : '' }}. Their {{ $json.occasion }} is in {{ $json.days_until }} days ({{ $json.date }}), so ideas must be buyable or bookable by then.\n\nInterests: {{ $json.interests || 'unknown: suggest broadly loved, personal-feeling gifts' }}\nBudget: {{ $json.budget }} each\nNotes: {{ $json.notes || 'none' }}\nGifts already given (do not repeat): {{ $json.last_gift || 'none' }}\n\nMix at least one experience and one practical item. price is a realistic estimate in the budget's currency. where is a type of shop (never a made-up shop name). search is a short shopping search query. card_line is one line for the card.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 3,
+          "delayBetweenBatches": 4000
+        }
+      },
+      "id": "f9adc245-114a-5a81-aa4c-05009c702942",
+      "name": "Suggest gift ideas",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1400,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "382a7fc3-6106-5e12-ac69-1e85b73b3f4b",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"ideas\": [\n    {\n      \"gift\": \"Beginner pottery class for two\",\n      \"why\": \"Loves making things and trying new hobbies\",\n      \"price\": \"\\u00a345\",\n      \"where\": \"Local craft studios or Buyagift\",\n      \"search\": \"pottery class for two\"\n    }\n  ],\n  \"card_line\": \"Happy birthday! Here's to a year of new adventures.\"\n}"
+      },
+      "id": "798d2837-0157-5d0f-bd7e-ff753dd20228",
+      "name": "Gift ideas JSON format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1540,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nreturn $input.all().map((item, i) => {\n  const p = $('Gift reminder or birthday today?').itemMatching(i).json;\n  const o = item.json.output || {};\n  const q = s => encodeURIComponent(s || '');\n  const lines = (o.ideas || []).slice(0, 5).map((g, n) =>\n    `${n + 1}. <b>${esc(g.gift)}</b> (${esc(g.price)})\\n   ${esc(g.why)}\\n   <a href=\"https://www.google.com/search?tbm=shop&q=${q(g.search || g.gift)}\">Search shops</a> · ${esc(g.where)}`);\n  const text = `🎁 <b>${esc(p.name)}</b>'s ${esc(p.occasion)} is in ${p.days_until} day${p.days_until === 1 ? '' : 's'} (${esc(p.date)})${p.turning ? `, turning ${p.turning}` : ''}.\\n\\n${lines.join('\\n\\n')}\\n\\n💌 Card idea: <i>${esc(o.card_line)}</i>`;\n  return { json: { ...p, text, ideas: (o.ideas || []).map(g => g.gift).join('; ') } };\n});"
+      },
+      "id": "73434b4d-f38e-5a52-bac4-230d3743a6c2",
+      "name": "Format gift message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set reminder settings').first().json.telegram_chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "f621bcfe-4dc2-5b88-bf6c-f47df93cffe7",
+      "name": "Send gift ideas to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1940,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 2. Suggest gifts in time to buy them",
+        "height": 500,
+        "width": 760,
+        "color": 7
+      },
+      "id": "3190f4f8-9516-56c1-8040-2aa37668abea",
+      "name": "Section: Suggest gifts in time to buy them",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write a birthday message from {{ $('Set reminder settings').first().json.my_name }} to {{ $json.name }} ({{ $json.relationship || 'friend' }}){{ $json.turning ? ', who turns ' + $json.turning + ' today' : '' }}. Style: {{ $('Set reminder settings').first().json.message_style }}.\nThings they care about: {{ $json.interests || 'unknown' }}. Notes: {{ $json.notes || 'none' }}.\nReturn message (2-4 sentences for a text or card, no hashtags, mention the age only if it is a round number) and short (one line for a quick text).",
+        "hasOutputParser": true
+      },
+      "id": "445d030f-e88c-5662-accf-f1411641ddec",
+      "name": "Draft birthday message",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2240,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "b27ffbfe-b402-5216-919c-0840f78b627a",
+      "name": "Gemini 3.5 Flash-Lite (messages)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"message\": \"Happy birthday! ...\",\n  \"short\": \"Happy birthday, have the best day!\"\n}"
+      },
+      "id": "4e21c9cf-bf74-5fe8-87bc-9bf4dbeb9cc5",
+      "name": "Message JSON format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2380,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set reminder settings').first().json.telegram_chat_id }}",
+        "text": "=🎂 It's <b>{{ $('Gift reminder or birthday today?').item.json.name }}</b>'s {{ $('Gift reminder or birthday today?').item.json.occasion }} today!\n\nReady to send:\n<i>{{ $json.output.message }}</i>\n\nQuick version: {{ $json.output.short }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "4d815c63-63e5-5133-97df-dd4d99b9329f",
+      "name": "Send the message draft to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2540,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Draft the birthday message on the day",
+        "height": 500,
+        "width": 520,
+        "color": 7
+      },
+      "id": "9f48d030-4023-548a-bd13-6ca7689a5702",
+      "name": "Section: Draft the birthday message on the day",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "db31463e-6e7e-5535-aca4-4d1d9a1579f0",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Workflow failed\nWorkflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send error alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "id": "f4477160-2ec1-55fb-b3d4-8971b5bfbc0a",
+      "position": [
+        140,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put the Telegram chat ID in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "5d479104-baba-543d-aad7-05e6195502bf",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Every morning at 8am": {
+      "main": [
+        [
+          {
+            "node": "Set reminder settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set reminder settings": {
+      "main": [
+        [
+          {
+            "node": "Read people",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read people": {
+      "main": [
+        [
+          {
+            "node": "Find upcoming birthdays",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find upcoming birthdays": {
+      "main": [
+        [
+          {
+            "node": "Skip reminders already sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip reminders already sent": {
+      "main": [
+        [
+          {
+            "node": "Gift reminder or birthday today?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Suggest gift ideas",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gift ideas JSON format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Suggest gift ideas",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite (messages)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Draft birthday message",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message JSON format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Draft birthday message",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gift reminder or birthday today?": {
+      "main": [
+        [
+          {
+            "node": "Suggest gift ideas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Draft birthday message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suggest gift ideas": {
+      "main": [
+        [
+          {
+            "node": "Format gift message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format gift message": {
+      "main": [
+        [
+          {
+            "node": "Send gift ideas to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft birthday message": {
+      "main": [
+        [
+          {
+            "node": "Send the message draft to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Send error alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
