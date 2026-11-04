@@ -1,0 +1,779 @@
+{
+  "name": "Analyse stock charts on Telegram with RSI, MACD and moving averages explained by Gemini",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Analyse stock charts on Telegram with RSI, MACD and moving averages explained by Gemini\n\nSend a ticker to your Telegram bot and get back a clean price chart plus a plain-English read of the technicals. The indicators (RSI 14, MACD 12/26/9, SMA 20/50/200, EMA 20) are **calculated in code from real daily prices**, so the AI explains numbers instead of guessing from a picture. No paid chart or data API: prices come from Yahoo Finance's public chart endpoint and the chart from QuickChart.\n\n### How it works\n1. **Receive Telegram message** gets `/ta AAPL`, `$TSLA` or a bare ticker (crypto `BTC`, London `VOD.L`, indices `^GSPC`).\n2. **Get daily prices from Yahoo** fetches a year of daily candles, with retries.\n3. **Compute indicators** works out RSI, MACD, moving averages, trend and a simple technical bias score, and builds the chart.\n4. **Draw chart with QuickChart** renders the PNG; **Explain the chart in plain English** (Gemini) writes the summary.\n5. The chart and the analysis go back to the chat, with a not-financial-advice note. Bad tickers get a helpful reply instead of an error.\n\n### Setup\n1. Create a bot with @BotFather and add a **Telegram** credential; add a free **Google Gemini (PaLM) API** credential.\n2. Optional: change `default_range` in **Set bot settings**.\n3. Activate the workflow and send `/start` to your bot.\n\nEducational use only: not financial advice.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "1ca3456a-21b1-5a1d-b734-90a7e58c8ac7",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "68c5f320-3fa0-549e-ada9-024b22915831",
+      "name": "Receive Telegram message",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        -100,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "webhookId": "22a1f7fc-ebe4-51bf-9dba-42dc88cba7b0"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c82a06f9-d524-5169-90d7-e4738446f7ca",
+              "name": "default_range",
+              "value": "1y",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ce4bb537-9426-559f-93da-c56305f37a19",
+      "name": "Set bot settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn a Telegram message into a ticker. Accepts /ta AAPL, $TSLA or a bare ticker; /start or /help shows usage.\nconst s = $('Set bot settings').first().json;\nconst msg = $('Receive Telegram message').first().json.message || {};\nconst raw = String(msg.text || '').trim();\nconst ALIAS = { BTC: 'BTC-USD', ETH: 'ETH-USD', SOL: 'SOL-USD', SPX: '^GSPC', SP500: '^GSPC', NASDAQ: '^IXIC', FTSE: '^FTSE', GOLD: 'GC=F' };\nconst words = raw.replace(/^\\/(\\w+)@\\w+/, '/$1').split(/\\s+/).filter(Boolean);\nconst first = (words[0] || '').toLowerCase();\nconst args = first.startsWith('/') ? words.slice(1) : words;\nlet t = (args[0] || '').replace(/^\\$/, '').toUpperCase();\nt = ALIAS[t] || t;\nconst ok = !['/start', '/help'].includes(first) && /^[A-Z0-9.^=\\-]{1,15}$/.test(t);\nreturn [{ json: { action: ok ? 'analyze' : 'help', chat_id: String(msg.chat?.id ?? ''), tickers: ok ? [t] : [],\n  range: s.default_range || '1y', raw } }];"
+      },
+      "id": "0f8fcdc2-7f51-5f56-828e-e51a9c03a5db",
+      "name": "Read the ticker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7d332cd6-005c-5de6-8a10-7041e1b4bb90",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "analyze",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0b15aa8f-e01c-541f-b73d-b18249fadb1e",
+      "name": "Ticker given?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "📊 <b>Technical analysis bot</b>\nSend a ticker and get a chart with RSI, MACD and moving averages explained in plain English.\n\nExamples: <code>/ta AAPL</code> · <code>TSLA</code> · <code>VOD.L</code> · <code>BTC</code> · <code>^GSPC</code>\n\n⚠️ Not financial advice. Educational technical analysis of delayed market data; do your own research.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "8ffd9284-1ecc-5d7f-89b2-219cd88c5918",
+      "name": "Send help",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        860,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "afd8f62d-88ca-5f9d-9d56-4eb337f58506",
+              "name": "symbol",
+              "value": "={{ $json.tickers[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "05c25423-a1d2-53c1-9e3b-8606f0c27810",
+              "name": "range",
+              "value": "={{ $json.range }}",
+              "type": "string"
+            },
+            {
+              "id": "b5ed1c8c-b660-5657-9cc3-613c2ff50dbe",
+              "name": "chat_id",
+              "value": "={{ $json.chat_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "56290ff6-754d-5a3c-ad61-c5e58d3e50a8",
+      "name": "Prepare ticker",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Read the command",
+        "height": 500,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "5170e394-1a19-5c83-9a4d-be6fa1121df6",
+      "name": "Section: Read the command",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent($json.symbol) + '?range=' + (['3mo', '6mo', '1y'].includes($json.range) ? '2y' : $json.range) + '&interval=1d&includePrePost=false' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 700
+            }
+          }
+        }
+      },
+      "id": "5cb920c8-81b9-51a6-b65c-ba88acf59b3f",
+      "name": "Get daily prices from Yahoo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Technical indicators computed from Yahoo Finance daily candles. Pure maths: the AI only explains these numbers.\nconst PRO = false;\nconst src = $('Prepare ticker').all();\nconst round = (x, d = 2) => (x === null || x === undefined || !isFinite(x)) ? null : Math.round(x * 10 ** d) / 10 ** d;\nconst sma = (a, n) => a.map((_, i) => i < n - 1 ? null : a.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n);\nconst ema = (a, n) => { const k = 2 / (n + 1); let e = null; return a.map((v, i) => {\n  if (i < n - 1) return null; if (e === null) { e = a.slice(0, n).reduce((s, x) => s + x, 0) / n; return e; }\n  e = v * k + e * (1 - k); return e; }); };\nfunction rsi(a, n = 14) {               // Wilder's smoothing\n  const out = a.map(() => null); let g = 0, l = 0;\n  for (let i = 1; i < a.length; i++) {\n    const d = a[i] - a[i - 1], up = Math.max(d, 0), dn = Math.max(-d, 0);\n    if (i <= n) { g += up; l += dn; if (i === n) { g /= n; l /= n; out[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l); } }\n    else { g = (g * (n - 1) + up) / n; l = (l * (n - 1) + dn) / n; out[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l); }\n  }\n  return out;\n}\nfunction pivots(hi, lo, w = 5) {        // swing highs / lows\n  const res = [];\n  for (let i = w; i < hi.length - w; i++) {\n    const h = hi.slice(i - w, i + w + 1), l = lo.slice(i - w, i + w + 1);\n    if (hi[i] === Math.max(...h)) res.push(hi[i]);\n    if (lo[i] === Math.min(...l)) res.push(lo[i]);\n  }\n  return res;\n}\nfunction levels(points, price, tol) {   // cluster pivots into zones, count touches\n  const zones = [];\n  for (const p of points.sort((a, b) => a - b)) {\n    const z = zones.find(z => Math.abs(z.level - p) <= tol);\n    if (z) { z.sum += p; z.n += 1; z.level = z.sum / z.n; } else zones.push({ level: p, sum: p, n: 1 });\n  }\n  const below = zones.filter(z => z.level < price).sort((a, b) => b.level - a.level);\n  const above = zones.filter(z => z.level > price).sort((a, b) => a.level - b.level);\n  return { support: below.slice(0, 2).map(z => ({ level: round(z.level), touches: z.n })),\n           resistance: above.slice(0, 2).map(z => ({ level: round(z.level), touches: z.n })) };\n}\nconst ago = n => n === 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago`;\nconst out = [];\n$input.all().forEach((item, i) => {\n  const req = src[i]?.json || {};\n  const symbol = req.symbol || '?';\n  const body = item.json || {};\n  const res = body.chart?.result?.[0];\n  const err = body.chart?.error?.description || body.error?.message || (typeof body.error === 'string' ? body.error : '');\n  if (!res || !res.timestamp) {\n    out.push({ json: { ok: false, symbol, chat_id: req.chat_id, problem: err ? `Yahoo Finance: ${err}` :\n      `No price data for ${symbol}. Check the ticker (US: AAPL, London: VOD.L, crypto: BTC-USD, index: ^GSPC).` } });\n    return;\n  }\n  const q = res.indicators?.quote?.[0] || {};\n  const rows = res.timestamp.map((t, k) => ({ t, o: q.open?.[k], h: q.high?.[k], l: q.low?.[k], c: q.close?.[k], v: q.volume?.[k] }))\n    .filter(r => [r.o, r.h, r.l, r.c].every(x => typeof x === 'number' && isFinite(x)));\n  if (rows.length < 35) {\n    out.push({ json: { ok: false, symbol, chat_id: req.chat_id, problem: `Only ${rows.length} trading days of data for ${symbol}; need at least 35.` } });\n    return;\n  }\n  const c = rows.map(r => r.c), hi = rows.map(r => r.h), lo = rows.map(r => r.l), vol = rows.map(r => r.v || 0);\n  const last = rows.length - 1, price = c[last], prev = c[last - 1];\n  const s20 = sma(c, 20), s50 = sma(c, 50), s200 = sma(c, 200), e20 = ema(c, 20);\n  const r14 = rsi(c, 14);\n  const e12 = ema(c, 12), e26 = ema(c, 26);\n  const macd = c.map((_, k) => e12[k] !== null && e26[k] !== null ? e12[k] - e26[k] : null);\n  const mv = macd.filter(x => x !== null), sigRaw = ema(mv, 9);\n  const signal = macd.map((_, k) => { const j = k - (macd.length - mv.length); return j >= 0 ? sigRaw[j] : null; });\n  const hist = macd.map((m, k) => m !== null && signal[k] !== null ? m - signal[k] : null);\n  const signals = [];\n  let bias = 0;\n  // Trend\n  const above50 = s50[last] !== null ? price > s50[last] : null, above200 = s200[last] !== null ? price > s200[last] : null;\n  if (above50 !== null) bias += above50 ? 15 : -15;\n  if (above200 !== null) bias += above200 ? 20 : -20;\n  let trend = 'sideways';\n  if (above50 && (above200 ?? true) && s20[last] > (s50[last] ?? 0)) trend = 'uptrend';\n  else if (above50 === false && !(above200 ?? false) && s20[last] < (s50[last] ?? Infinity)) trend = 'downtrend';\n  for (let k = Math.max(1, last - 9); k <= last; k++) {\n    if ([s50[k], s200[k], s50[k - 1], s200[k - 1]].some(x => x === null)) continue;\n    if (s50[k - 1] <= s200[k - 1] && s50[k] > s200[k]) signals.push(`Golden cross (50-day above 200-day) ${ago(last - k)}`);\n    if (s50[k - 1] >= s200[k - 1] && s50[k] < s200[k]) signals.push(`Death cross (50-day below 200-day) ${ago(last - k)}`);\n  }\n  // Momentum\n  const rNow = r14[last], rPrev = r14[last - 1];\n  if (rNow !== null) {\n    if (rNow >= 70) { signals.push(`RSI ${round(rNow, 0)}: overbought zone`); bias -= 10; }\n    else if (rNow <= 30) { signals.push(`RSI ${round(rNow, 0)}: oversold zone`); bias += 10; }\n    else bias += (rNow - 50) / 2;\n    if (rPrev !== null && rPrev < 30 && rNow >= 30) signals.push('RSI moved back above 30');\n    if (rPrev !== null && rPrev > 70 && rNow <= 70) signals.push('RSI dropped back below 70');\n  }\n  for (let k = Math.max(1, last - 2); k <= last; k++) {\n    if (hist[k] === null || hist[k - 1] === null) continue;\n    if (hist[k - 1] <= 0 && hist[k] > 0) { signals.push(`MACD crossed above its signal line ${ago(last - k)}`); bias += 10; }\n    if (hist[k - 1] >= 0 && hist[k] < 0) { signals.push(`MACD crossed below its signal line ${ago(last - k)}`); bias -= 10; }\n  }\n  if (hist[last] !== null) bias += hist[last] > 0 ? 5 : -5;\n  const ind = {\n    price: round(price), change_pct: round((price / prev - 1) * 100), as_of: new Date(rows[last].t * 1000).toISOString().slice(0, 10),\n    sma20: round(s20[last]), sma50: round(s50[last]), sma200: round(s200[last]), ema20: round(e20[last]),\n    rsi14: round(rNow, 1), macd: round(macd[last], 3), macd_signal: round(signal[last], 3), macd_hist: round(hist[last], 3),\n  };\n  let lv = { support: [], resistance: [] }, chartExtra = {};\n  if (PRO) {\n    const sd = c.map((_, k) => k < 19 ? null : Math.sqrt(c.slice(k - 19, k + 1).reduce((s, v) => s + (v - s20[k]) ** 2, 0) / 20));\n    const bbU = s20.map((m, k) => m === null ? null : m + 2 * sd[k]), bbL = s20.map((m, k) => m === null ? null : m - 2 * sd[k]);\n    const tr = rows.map((r, k) => k === 0 ? r.h - r.l : Math.max(r.h - r.l, Math.abs(r.h - c[k - 1]), Math.abs(r.l - c[k - 1])));\n    const atr = sma(tr, 14);\n    const width = s20.map((m, k) => m ? (bbU[k] - bbL[k]) / m : null);\n    const recentW = width.slice(-120).filter(x => x !== null);\n    const vAvg = sma(vol, 20);\n    const yr = rows.slice(-252);\n    const hi52 = Math.max(...yr.map(r => r.h)), lo52 = Math.min(...yr.map(r => r.l));\n    lv = levels(pivots(hi.slice(-150), lo.slice(-150)), price, (atr[last] || price * 0.01) * 0.75);\n    Object.assign(ind, { bb_upper: round(bbU[last]), bb_lower: round(bbL[last]), atr14: round(atr[last]),\n      atr_pct: round(atr[last] / price * 100), volume_vs_20d: vAvg[last] ? round(vol[last] / vAvg[last]) : null,\n      high_52w: round(hi52), low_52w: round(lo52), from_52w_high_pct: round((price / hi52 - 1) * 100),\n      support: lv.support, resistance: lv.resistance });\n    if (bbU[last] !== null && price > bbU[last]) signals.push('Closed above the upper Bollinger Band (stretched)');\n    if (bbL[last] !== null && price < bbL[last]) signals.push('Closed below the lower Bollinger Band (stretched)');\n    if (recentW.length > 60 && width[last] !== null && width[last] <= Math.min(...recentW) * 1.05) signals.push('Bollinger squeeze: volatility at a 6-month low');\n    if (ind.volume_vs_20d && ind.volume_vs_20d >= 2) signals.push(`Volume ${ind.volume_vs_20d}x its 20-day average`);  // today's bar can be partial during market hours\n    if (lv.resistance[0] && prev < lv.resistance[0].level && price >= lv.resistance[0].level) signals.push(`Broke above resistance near ${lv.resistance[0].level}`);\n    const brokeSup = levels(pivots(hi.slice(-151, -1), lo.slice(-151, -1)), prev, (atr[last] || price * 0.01) * 0.75).support[0];\n    if (brokeSup && price < brokeSup.level) signals.push(`Fell below support near ${brokeSup.level}`);\n    if (ind.from_52w_high_pct !== null && ind.from_52w_high_pct >= -1) signals.push('Trading at or near its 52-week high');\n    if (price <= lo52 * 1.01) signals.push('Trading at or near its 52-week low');\n    chartExtra = { bbU, bbL };\n  }\n  bias = Math.max(-100, Math.min(100, Math.round(bias)));\n  const label = bias >= 25 ? 'bullish' : bias <= -25 ? 'bearish' : 'neutral';\n  // Chart window = the requested range (2 years are always fetched so the 200-day average exists)\n  const BARS = { '3mo': 63, '6mo': 126, '1y': 252, '2y': 504, '5y': 1260 };\n  const N = Math.min(BARS[req.range] || 252, rows.length), from = rows.length - N;\n  const step = Math.ceil(N / 240);                     // QuickChart's free tier allows about 250 points per line\n  const idx = []; for (let k = last; k >= from; k -= step) idx.unshift(k);\n  const cut = a => idx.map(k => a[k] === null || a[k] === undefined ? null : round(a[k]));\n  const datasets = [\n    { label: symbol, data: cut(c), borderColor: '#1f6feb', borderWidth: 2, pointRadius: 0, fill: false },\n    { label: 'SMA 20', data: cut(s20), borderColor: '#f59e0b', borderWidth: 1.5, pointRadius: 0, fill: false },\n    { label: 'SMA 50', data: cut(s50), borderColor: '#8b5cf6', borderWidth: 1.5, pointRadius: 0, fill: false },\n  ];\n  if (s200[last] !== null) datasets.push({ label: 'SMA 200', data: cut(s200), borderColor: '#111827', borderWidth: 1.5, pointRadius: 0, fill: false });\n  if (PRO) {\n    datasets.push({ label: 'BB upper', data: cut(chartExtra.bbU), borderColor: '#9ca3af', borderDash: [4, 4], borderWidth: 1, pointRadius: 0, fill: false });\n    datasets.push({ label: 'BB lower', data: cut(chartExtra.bbL), borderColor: '#9ca3af', borderDash: [4, 4], borderWidth: 1, pointRadius: 0, fill: false });\n    lv.support.slice(0, 1).forEach(z => datasets.push({ label: `Support ${z.level}`, data: Array(idx.length).fill(z.level), borderColor: '#16a34a', borderDash: [8, 4], borderWidth: 1.5, pointRadius: 0, fill: false }));\n    lv.resistance.slice(0, 1).forEach(z => datasets.push({ label: `Resistance ${z.level}`, data: Array(idx.length).fill(z.level), borderColor: '#dc2626', borderDash: [8, 4], borderWidth: 1.5, pointRadius: 0, fill: false }));\n  }\n  const labels = idx.map(k => new Date(rows[k].t * 1000).toISOString().slice(N > 300 ? 2 : 5, N > 300 ? 7 : 10));\n  const name = String(res.meta?.shortName || res.meta?.longName || symbol).replace(/\\s+/g, ' ').trim();\n  const chart = { version: '4', backgroundColor: '#ffffff', width: 900, height: 500, format: 'png',\n    chart: { type: 'line', data: { labels, datasets },\n      options: { plugins: { title: { display: true, text: `${name} (${symbol}) · ${res.meta?.currency || ''} ${ind.price} · RSI ${ind.rsi14 ?? '-'} · MACD ${hist[last] > 0 ? 'above' : 'below'} signal` },\n        legend: { labels: { boxWidth: 12 } } },\n        scales: { x: { ticks: { maxTicksLimit: 12 } } } } } };\n  out.push({ json: { ok: true, symbol, name, currency: res.meta?.currency || '', exchange: res.meta?.fullExchangeName || res.meta?.exchangeName || '',\n    chat_id: req.chat_id, range: req.range, trend, bias_score: bias, bias: label, signals, indicators: ind, chart } });\n});\nreturn out;"
+      },
+      "id": "cb5477f5-69fb-54df-bd9b-5a8af7b3e8e2",
+      "name": "Compute indicators",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5dbee39f-e44d-5eb5-abcb-b9a12adb1e02",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9c8b4288-0fa1-59e1-898a-ce94ba9f6800",
+      "name": "Price data found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://quickchart.io/chart",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.chart) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "017e6316-8d94-5df6-86d2-88e0151543f2",
+      "name": "Draw chart with QuickChart",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1880,
+        -100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a careful technical-analysis explainer for retail investors. Explain the indicators below in plain English for {{ $('Compute indicators').item.json.name }} ({{ $('Compute indicators').item.json.symbol }}).\n\nRules:\n- Use ONLY the numbers given. Never invent prices, news, earnings, fundamentals or targets.\n- Never tell the reader to buy, sell or hold, and never give position sizes. Describe what the chart shows and what would change the picture.\n- Short sentences, no jargon without a quick explanation (e.g. \"RSI 72, which traders read as overbought\").\n- If indicators disagree, say so.\n\nData (daily candles, as of {{ $('Compute indicators').item.json.indicators.as_of }}):\nTrend: {{ $('Compute indicators').item.json.trend }} | technical bias {{ $('Compute indicators').item.json.bias }} ({{ $('Compute indicators').item.json.bias_score }} on a -100..100 scale)\nIndicators: {{ JSON.stringify($('Compute indicators').item.json.indicators) }}\nSignals: {{ $('Compute indicators').item.json.signals.join('; ') || 'none' }}",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 2,
+          "delayBetweenBatches": 4000
+        }
+      },
+      "id": "bafc7be7-35f8-521e-99e1-3806a7b14be0",
+      "name": "Explain the chart in plain English",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2120,
+        -100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "22ff3ab1-9c76-52e7-864e-a9796af9344f",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        2120,
+        120
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"headline\": \"Uptrend intact but stretched after a strong week\",\n  \"trend\": \"Price is above its 50- and 200-day averages, so the longer trend is up.\",\n  \"momentum\": \"RSI 71 is in the zone traders call overbought; MACD is above its signal line.\",\n  \"levels\": \"Nearest support around 182 (tested 3 times); resistance near 199.\",\n  \"watch\": \"A daily close below 182 would weaken the uptrend; a push through 199 would extend it.\",\n  \"risk\": \"Volatility (ATR) is about 2.1% a day, so normal swings are roughly 4 dollars.\"\n}"
+      },
+      "id": "1af52638-d5c1-51f7-8c30-b100aa8094e1",
+      "name": "Explanation format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2260,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n// One Telegram report per ticker: short chart caption + full analysis. Falls back to the numbers if the AI step failed.\nconst comp = $('Compute indicators').all().filter(x => x.json.ok);\nconst charts = $('Draw chart with QuickChart').all();\nconst DISC = 'Not financial advice. Educational technical analysis of delayed market data; do your own research.';\nreturn $input.all().map((item, i) => {\n  const d = comp[i]?.json || {};\n  const ai = item.json.output || {};\n  const ind = d.indicators || {};\n  const fmt = v => v === null || v === undefined ? '-' : v;\n  const arrow = ind.change_pct > 0 ? '▲' : ind.change_pct < 0 ? '▼' : '•';\n  const icon = { bullish: '🟢', bearish: '🔴', neutral: '🟡' }[d.bias] || '⚪';\n  const lines = [`<b>${esc(d.name)} (${esc(d.symbol)})</b> ${esc(d.currency)} ${fmt(ind.price)} ${arrow} ${fmt(ind.change_pct)}%`,\n    `${icon} Technical bias: <b>${esc(d.bias)}</b> (${d.bias_score}) · ${esc(d.trend)}`,\n    ai.headline ? `<i>${esc(ai.headline)}</i>` : ''];\n  const caption = (lines.filter(Boolean).join('\\n') + `\\n\\n⚠️ ${DISC}`).slice(0, 1000);\n  const nums = [`RSI(14) ${fmt(ind.rsi14)} · MACD hist ${fmt(ind.macd_hist)}`,\n    `SMA20 ${fmt(ind.sma20)} · SMA50 ${fmt(ind.sma50)} · SMA200 ${fmt(ind.sma200)} · EMA20 ${fmt(ind.ema20)}`];\n  if (ind.bb_upper !== undefined) nums.push(`Bollinger ${fmt(ind.bb_lower)}–${fmt(ind.bb_upper)} · ATR ${fmt(ind.atr14)} (${fmt(ind.atr_pct)}%/day)`);\n  if (ind.support) nums.push(`Support ${(ind.support || []).map(z => z.level).join(', ') || '-'} · Resistance ${(ind.resistance || []).map(z => z.level).join(', ') || '-'}`);\n  if (ind.high_52w !== undefined) nums.push(`52w range ${fmt(ind.low_52w)}–${fmt(ind.high_52w)} (${fmt(ind.from_52w_high_pct)}% from high)`);\n  const body = ai.trend ? [`📈 <b>Trend</b>: ${esc(ai.trend)}`, `⚡ <b>Momentum</b>: ${esc(ai.momentum)}`, `🧱 <b>Levels</b>: ${esc(ai.levels)}`,\n    `👀 <b>What to watch</b>: ${esc(ai.watch)}`, ai.risk ? `🎢 <b>Volatility</b>: ${esc(ai.risk)}` : ''].filter(Boolean).join('\\n')\n    : '<i>(AI summary unavailable this time; numbers below are computed directly from the price data.)</i>';\n  const sig = (d.signals || []).length ? '\\n\\n🔔 <b>Signals</b>\\n' + d.signals.map(s => '• ' + esc(s)).join('\\n') : '';\n  const text = `${lines.filter(Boolean).join('\\n')}\\n\\n${body}${sig}\\n\\n<code>${esc(nums.join('\\n'))}</code>\\n\\nData: Yahoo Finance daily candles to ${esc(ind.as_of)}.\\n⚠️ ${DISC}`;\n  const bin = charts[i]?.binary;\n  return { json: { symbol: d.symbol, chat_id: d.chat_id, caption, text: text.slice(0, 4000), has_chart: !!(bin && bin.data) }, ...(bin && bin.data ? { binary: bin } : {}) };\n});"
+      },
+      "id": "7f9d45d2-1243-532b-8c3c-f763076ed7dd",
+      "name": "Format the report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "=⚠️ {{ $json.problem }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "ccdd2de1-c577-597b-a06b-09f65dffbd98",
+      "name": "Explain the problem",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1880,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 2. Prices, indicators, chart and AI read",
+        "height": 600,
+        "width": 1480,
+        "color": 7
+      },
+      "id": "2128719b-4492-53f7-b100-dcf5b21de663",
+      "name": "Section: Prices, indicators, chart and AI read",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a9fbe265-3ffb-574b-8564-4eefb337d986",
+              "leftValue": "={{ $json.has_chart }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "36b9a16e-7a88-5401-8af2-b69ec4cee518",
+      "name": "Chart ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "={{ $json.chat_id }}",
+        "binaryData": true,
+        "binaryPropertyName": "data",
+        "additionalFields": {
+          "caption": "={{ $json.caption }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "f72eb86e-1c63-5a8f-9c97-51fbfe4c0d8f",
+      "name": "Send chart to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2960,
+        -100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Format the report').item.json.chat_id }}",
+        "text": "={{ $('Format the report').item.json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "a9b58d81-ae17-5561-beea-cf1969ad0f79",
+      "name": "Send analysis to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3200,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Reply on Telegram",
+        "height": 400,
+        "width": 700,
+        "color": 7
+      },
+      "id": "6ec765ea-dbf5-5a83-a13f-9c608731dba5",
+      "name": "Section: Reply on Telegram",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        -220
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e0633460-080f-5640-bf70-ef1424b1b700",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Workflow failed\nWorkflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send error alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram account"
+        }
+      },
+      "id": "d6eeda4d-38a8-515b-875e-989c3d5a3b53",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put the Telegram chat ID in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "0504b454-5d31-5081-a4ed-2735dc0e7a1f",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Explain the chart in plain English",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explanation format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Explain the chart in plain English",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get daily prices from Yahoo": {
+      "main": [
+        [
+          {
+            "node": "Compute indicators",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute indicators": {
+      "main": [
+        [
+          {
+            "node": "Price data found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Price data found?": {
+      "main": [
+        [
+          {
+            "node": "Draw chart with QuickChart",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain the problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draw chart with QuickChart": {
+      "main": [
+        [
+          {
+            "node": "Explain the chart in plain English",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explain the chart in plain English": {
+      "main": [
+        [
+          {
+            "node": "Format the report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chart ready?": {
+      "main": [
+        [
+          {
+            "node": "Send chart to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send analysis to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send chart to Telegram": {
+      "main": [
+        [
+          {
+            "node": "Send analysis to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Telegram message": {
+      "main": [
+        [
+          {
+            "node": "Set bot settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set bot settings": {
+      "main": [
+        [
+          {
+            "node": "Read the ticker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the ticker": {
+      "main": [
+        [
+          {
+            "node": "Ticker given?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticker given?": {
+      "main": [
+        [
+          {
+            "node": "Prepare ticker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send help",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare ticker": {
+      "main": [
+        [
+          {
+            "node": "Get daily prices from Yahoo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format the report": {
+      "main": [
+        [
+          {
+            "node": "Chart ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Send error alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
