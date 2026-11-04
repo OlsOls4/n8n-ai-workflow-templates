@@ -1,0 +1,533 @@
+{
+  "name": "Check if a website is trustworthy with domain age, page checks and a Gemini risk verdict",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Check if a website is trustworthy with domain age, page checks and a Gemini risk verdict\n\nPaste a link into a form and get a clear low / medium / high risk report before you buy from a shop, pay a new supplier or click a link someone sent you. The score comes from **facts, not AI guesswork**: domain age from the public RDAP registry, whether the site loads over HTTPS, security headers, contact details, privacy and returns policies, company details, extreme discounts and risky payment wording. Gemini only explains the result in plain English. No SerpAPI or paid lookups.\n\n### How it works\n1. **Check a website** form takes the URL (and optional context like \"supplier\" or \"online shop\").\n2. **Normalise the URL** works out the domain (handles co.uk and similar).\n3. **Fetch the page** and **Look up domain age (RDAP)** gather the facts; failures count as unknown, never crash the run.\n4. **Score the risk signals** adds points per red flag and returns a 0-100 score with red flags and good signs.\n5. **Write the verdict** (Gemini) explains it and suggests next steps; **Show the report** displays it.\n\n### Setup\n1. Add a free **Google Gemini (PaLM) API** credential.\n2. Activate the workflow and open the form's production URL.\n\n### Customise\nChange the weights or word lists at the top of **Score the risk signals**. Results are signals, not proof.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "1d954686-a306-542c-bd18-3ba5f2df2a3f",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Is this website trustworthy?",
+        "formDescription": "Paste a link. You'll get a risk report built from domain age, HTTPS, contact details and policy checks.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Website URL",
+              "fieldName": "url",
+              "fieldType": "text",
+              "requiredField": true,
+              "placeholder": "https://example-shop.com"
+            },
+            {
+              "fieldLabel": "What are you about to do?",
+              "fieldName": "context",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Buy from an online shop"
+                  },
+                  {
+                    "option": "Pay a new supplier"
+                  },
+                  {
+                    "option": "Sign up / log in"
+                  },
+                  {
+                    "option": "Click a link I was sent"
+                  },
+                  {
+                    "option": "Other"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Check it"
+        }
+      },
+      "id": "40913a44-ed14-5c0e-ba00-d01e18413736",
+      "name": "Check a website",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "ca85c0a1-b7cc-59da-a35b-72808e9115bf"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "eb32e981-cc81-57a2-b7e8-828b4d64a928",
+              "name": "channel",
+              "value": "form",
+              "type": "string"
+            },
+            {
+              "id": "4586ebf7-ce2e-5689-a901-06815b1f862e",
+              "name": "requested_by",
+              "value": "form",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {},
+        "includeOtherFields": true
+      },
+      "id": "6cc0ce5a-da78-54d7-87f0-478a53380234",
+      "name": "Set checker settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Get the URL",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "99a2ab19-dfb3-5cf9-8974-c281217e4374",
+      "name": "Section: Get the URL",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean up the URL and work out the registrable domain (handles common two-part suffixes like co.uk).\nconst TWO = ['co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'ac.uk', 'gov.uk', 'net.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'co.za',\n  'co.jp', 'com.br', 'com.mx', 'co.in', 'com.cn', 'com.sg', 'com.hk', 'com.tr', 'co.kr', 'com.ar', 'com.my', 'com.ph', 'co.id'];\nreturn $input.all().map(item => {\n  const j = item.json;\n  let raw = String(j.url || '').trim().match(/(https?:\\/\\/)?[a-z0-9.-]+\\.[a-z]{2,}[^\\s<>\"']*/i)?.[0] || '';\n  if (raw && !/^https?:\\/\\//i.test(raw)) raw = 'https://' + raw;\n  // plain string parsing (the URL class is not available in every n8n Code sandbox)\n  const rest = raw.replace(/^https?:\\/\\//i, '');\n  const host = (rest.split(/[\\/?#]/)[0] || '').replace(/:\\d+$/, '').replace(/^[^@]*@/, '').toLowerCase().replace(/\\.$/, '');\n  const path = rest.slice(rest.split(/[\\/?#]/)[0].length) || '/';\n  const valid = /^[a-z0-9-]+(\\.[a-z0-9-]+)+$/.test(host) && /[a-z]{2,}$|^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(host);\n  const parts = host.split('.');\n  const two = parts.slice(-2).join('.');\n  const three = parts.slice(-3);\n  const domain = TWO.includes(two) && parts.length >= 3 && three[0] !== 'www' ? three.join('.') : two;\n  return { json: { ...j, url: raw, host, domain, valid, https_url: valid ? 'https://' + host + (path.startsWith('/') ? path : '/' + path) : '',\n    http_url: valid ? 'http://' + host + '/' : '', checked_at: new Date().toISOString() } };\n});"
+      },
+      "id": "bcb3b17e-eb91-5b58-8bd7-0ba5f71170f3",
+      "name": "Normalise the URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.https_url || 'https://invalid.invalid/' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-GB,en;q=0.8"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "id": "f9440166-d014-56ab-ad56-a6ceb9b34a4f",
+      "name": "Fetch the page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        680,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://rdap.org/domain/' + ($('Normalise the URL').item.json.domain || 'invalid.invalid') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/rdap+json, application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "76082598-6888-503c-9b74-8a074bafdc25",
+      "name": "Look up domain age (RDAP)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        920,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Facts first: turn the raw checks into signals and a 0-100 risk score. The AI later explains these; it does not set the score.\nconst PRO = false;\nconst s = $('Set checker settings').first().json;\nconst base = $('Normalise the URL').all();\nconst pick = (name, i) => { try { return $(name).all()[i]?.json ?? null; } catch (e) { return null; } };\nconst SUS_TLD = ['zip', 'mov', 'top', 'xyz', 'icu', 'click', 'gq', 'tk', 'ml', 'cf', 'ga', 'buzz', 'rest', 'cam', 'sbs', 'cfd', 'bond', 'cyou', 'monster', 'quest', 'lol'];\nconst BRANDS = ['paypal', 'apple', 'amazon', 'microsoft', 'netflix', 'google', 'facebook', 'instagram', 'whatsapp', 'royalmail', 'dhl', 'fedex', 'ups', 'hmrc', 'coinbase', 'binance', 'metamask', 'ebay', 'barclays', 'hsbc', 'natwest', 'lloyds', 'santander', 'chase', 'wellsfargo'];\nconst daysSince = d => { const t = Date.parse(String(d).replace(/^(\\w{3}) /, '')); return isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : null; };\nreturn base.map((b, i) => {\n  const u = b.json;\n  const red = [], green = [], facts = {};\n  let risk = 0;\n  const add = (pts, msg) => { risk += pts; red.push(msg); };\n  if (!u.valid) return { json: { ...u, risk_score: null, risk_level: 'unknown', red_flags: ['Not a valid web address, so nothing could be checked'], green_flags: [], facts: {} } };\n  // --- domain name itself\n  const tld = u.domain.split('.').pop();\n  if (/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(u.host)) add(20, 'The address is a bare IP number, not a domain name');\n  if (u.host.includes('xn--')) add(15, 'Uses an internationalised (punycode) domain that can imitate other letters');\n  if (SUS_TLD.includes(tld)) add(10, `.${tld} domains are cheap and common in scams`);\n  if ((u.domain.match(/-/g) || []).length >= 2) add(5, 'Domain has several hyphens');\n  const tokens = u.host.split(/[.-]/);\n  const brand = BRANDS.find(br => tokens.includes(br) && !u.domain.startsWith(br + '.'));   // e.g. paypal-secure-login.shop\n  if (brand) add(25, `Mentions \"${brand}\" but the site is not on ${brand}'s own domain`);\n  // --- domain age (RDAP)\n  let rd = pick('Look up domain age (RDAP)', i) || {};\n  if (typeof rd.data === 'string') { try { rd = JSON.parse(rd.data); } catch (e) {} }   // some registries answer as application/rdap+json text\n  const ev = Array.isArray(rd.events) ? rd.events : [];\n  const reg = ev.find(e => e.eventAction === 'registration')?.eventDate;\n  const exp = ev.find(e => e.eventAction === 'expiration')?.eventDate;\n  const registrar = (rd.entities || []).find(e => (e.roles || []).includes('registrar'))?.vcardArray?.[1]?.find(v => v[0] === 'fn')?.[3] || '';\n  const age = reg ? daysSince(reg) : null;\n  facts.domain_registered = reg ? String(reg).slice(0, 10) : 'unknown'; facts.domain_age_days = age; facts.registrar = registrar;\n  facts.domain_expires = exp ? String(exp).slice(0, 10) : 'unknown';\n  if (age === null) add(5, 'Domain age could not be confirmed (registry gave no date)');\n  else if (age < 30) add(35, `Domain registered only ${age} days ago`);\n  else if (age < 90) add(25, `Domain registered ${age} days ago (under 3 months)`);\n  else if (age < 365) add(10, `Domain is less than a year old (${age} days)`);\n  else if (age >= 1825) { risk -= 10; green.push(`Domain registered ${Math.floor(age / 365)} years ago`); }\n  else green.push(`Domain is ${Math.floor(age / 365)}+ year(s) old`);\n  if (exp && daysSince(exp) !== null && -daysSince(exp) < 60 && age !== null && age < 400) add(5, 'Domain is registered for only about a year (expires soon)');\n  // --- page fetch, HTTPS, headers\n  const pg = pick('Fetch the page', i) || {};\n  const st = Number(pg.statusCode) || 0;\n  const headers = Object.fromEntries(Object.entries(pg.headers || {}).map(([k, v]) => [k.toLowerCase(), String(v)]));\n  const html = String(pg.body ?? pg.data ?? '');\n  facts.http_status = st || 'no response';\n  if (!st || pg.error) add(15, 'The site did not load over HTTPS');\n  else if (st >= 400) add(10, `The page answered with HTTP ${st}`);\n  else green.push('Loads over HTTPS');\n  const sec = { 'strict-transport-security': 'HSTS', 'content-security-policy': 'CSP', 'x-frame-options': 'X-Frame-Options',\n    'x-content-type-options': 'X-Content-Type-Options', 'referrer-policy': 'Referrer-Policy', 'permissions-policy': 'Permissions-Policy' };\n  const present = Object.keys(sec).filter(h => headers[h]);\n  facts.security_headers = present.map(h => sec[h]).join(', ') || 'none';\n  if (st && st < 400) { if (present.length <= 1) add(5, 'Almost no security headers'); else if (present.length >= 4) green.push(`${present.length} of 6 security headers set`); }\n  if (headers['server']) facts.server = headers['server'];\n  // --- page content\n  const text = html.replace(/<script[\\s\\S]*?<\\/script>|<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\\s+/g, ' ');\n  const low = text.toLowerCase(), hl = html.toLowerCase();\n  const links = [...hl.matchAll(/<a\\b[^>]*href=\"([^\"]*)\"[^>]*>([\\s\\S]*?)<\\/a>/g)].map(m => (m[1] + ' ' + m[2].replace(/<[^>]+>/g, '')).toLowerCase());\n  const has = rx => links.some(l => rx.test(l)) || rx.test(low);\n  facts.title = (html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || '').replace(/\\s+/g, ' ').trim().slice(0, 140);\n  facts.words = low.split(' ').filter(Boolean).length;\n  if (html) {\n    const email = /[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}/i.test(text), phone = /(\\+?\\d[\\d\\s().-]{8,}\\d)/.test(text);\n    const contact = links.some(l => /contact|kontakt|about/.test(l));\n    facts.contact = [contact && 'contact/about page', email && 'e-mail', phone && 'phone'].filter(Boolean).join(', ') || 'none';\n    if (!contact && !email && !phone) add(15, 'No contact page, e-mail address or phone number found');\n    else green.push('Contact details: ' + facts.contact);\n    const privacy = has(/privacy|datenschutz|gdpr/), terms = has(/terms|conditions|agb/);\n    if (!privacy) add(5, 'No privacy policy link'); \n    if (privacy && terms) green.push('Privacy policy and terms linked');\n    const shop = /add to (cart|basket|bag)|checkout|buy now|shopping (cart|bag|basket)|your (cart|basket|bag)/.test(low);\n    facts.looks_like_shop = shop;\n    if (shop) {\n      if (!has(/refund|return|exchange|widerruf/)) add(10, 'Sells products but has no returns/refund policy link');\n      const company = /company (no|number|reg)|registered in (england|scotland|wales)|vat (no|number|reg)|\\bein\\b|\\babn\\b|registered office|handelsregister|siret|kvk/.test(low);\n      if (!company) add(5, 'Shop shows no company registration or VAT number'); else green.push('Shows company registration / VAT details');\n      const off = [...low.matchAll(/(\\d{2})\\s?% off/g)].map(m => +m[1]);\n      if (off.some(x => x >= 70)) add(10, `Extreme discounts (up to ${Math.max(...off)}% off)`);\n    }\n    if (/western union|moneygram|gift ?cards? (only|as payment)|pay (only )?(by|with) (bitcoin|crypto|bank transfer)|bank transfer only|crypto only|zelle only|friends and family/.test(low)) add(25, 'Asks for hard-to-refund payment (bank transfer, crypto, gift cards or money transfer)');\n    if (/only \\d+ left|limited time|offer ends|act now|hurry|last chance|today only/.test(low)) add(5, 'Pressure / urgency wording');\n    if (/verify your (account|identity)|account (suspended|locked)|confirm your (password|card)|enter your (password|card number)/.test(low)) add(20, 'Phishing-style wording (verify / suspended account / enter password)');\n    const yr = Math.max(0, ...[...text.matchAll(/(?:©|&copy;|copyright)\\s*(?:\\d{4}\\s*[-–]\\s*)?(20\\d{2})/gi)].map(m => +m[1]));\n    if (yr && yr < new Date().getFullYear() - 2) add(3, `Copyright notice is out of date (${yr})`);\n    if (facts.words < 80) add(5, 'Very little text on the page');\n  }\n  if (PRO) {\n    // --- final URL / redirect, plain http\n    const fin = String(pg.headers?.['x-final-url'] || '');\n    const plain = pick('Check HTTP to HTTPS redirect', i) || {};\n    const loc = String((plain.headers || {}).location || '');\n    facts.http_redirects_to_https = /^https:/i.test(loc);\n    if (plain.statusCode && !/^https:/i.test(loc) && Number(plain.statusCode) < 400) add(5, 'Plain http:// does not redirect to https://');\n    if (loc && /^https?:\\/\\//i.test(loc)) { const h = loc.replace(/^https?:\\/\\//i, '').split(/[\\/?#:]/)[0].toLowerCase(); if (h && !h.endsWith(u.domain)) add(10, `Redirects to a different domain (${h})`); }\n    // --- certificate transparency (Cert Spotter)\n    const ct = pick('Check TLS certificate history', i) || {};\n    let certs = []; try { certs = JSON.parse(ct.data || ct.body || '[]'); } catch (e) {}\n    if (Array.isArray(certs) && certs.length) {\n      const first = certs.map(c => daysSince(c.not_before)).filter(x => x !== null).sort((a, b) => b - a)[0];\n      const latest = certs[certs.length - 1];\n      facts.first_certificate_days_ago = first ?? 'unknown';\n      facts.certificate_issuer = latest.issuer?.friendly_name || latest.issuer?.name || '';\n      facts.certificate_expires = String(latest.not_after || '').slice(0, 25);\n      if (first !== null && first !== undefined && first < 30) add(10, `First HTTPS certificate issued only ${first} days ago`);\n      else if (first > 365) green.push(`HTTPS certificates on record for ${Math.floor(first / 365)}+ year(s)`);\n    } else facts.first_certificate_days_ago = 'unknown';\n    // --- Google Safe Browsing (optional)\n    const sb = pick('Check Google Safe Browsing', i);\n    if (sb && !sb.error) {\n      const m = sb.matches || [];\n      facts.safe_browsing = m.length ? m.map(x => x.threatType).join(', ') : 'no match';\n      if (m.length) { risk = Math.max(risk, 100); red.unshift('Google Safe Browsing lists this site: ' + facts.safe_browsing); }\n      else green.push('Not on Google Safe Browsing lists');\n    } else facts.safe_browsing = s.safe_browsing_api_key ? 'check failed' : 'not checked (no API key)';\n  }\n  risk = Math.max(0, Math.min(100, Math.round(risk)));\n  const level = risk >= 50 ? 'high' : risk >= 25 ? 'medium' : 'low';\n  return { json: { ...u, risk_score: risk, risk_level: level, red_flags: red, green_flags: green, facts } };\n});"
+      },
+      "id": "8b87a4fe-f3f1-5e38-8e61-02fec445f503",
+      "name": "Score the risk signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You explain website safety checks to a non-technical person who is about to buy from, sign up to, or pay a supplier through this site{{ $json.context ? ' (context: ' + $json.context + ')' : '' }}.\n\nSite: {{ $json.host }}\nRisk score (computed from the checks, do not change it): {{ $json.risk_score }}/100 = {{ $json.risk_level }} risk\nRed flags: {{ JSON.stringify($json.red_flags) }}\nGood signs: {{ JSON.stringify($json.green_flags) }}\nFacts: {{ JSON.stringify($json.facts) }}\n\nWrite:\n- verdict: one short sentence matching the {{ $json.risk_level }} risk level.\n- summary: 2-3 sentences in plain English on what the checks found.\n- top_concerns: up to 3 of the most important red flags in your own words (empty if none).\n- advice: 2-3 concrete next steps (e.g. pay by credit card for chargeback protection, search the company number, look for independent reviews).\nDo not claim the site IS a scam or IS safe: these are signals, not proof. Use only the data above.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 2,
+          "delayBetweenBatches": 3000
+        }
+      },
+      "id": "22aa2ee7-7158-5c17-bc01-f4c05393b9ee",
+      "name": "Write the verdict",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1400,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "5e3aa81d-93b3-5dfc-a94e-96c8b06eae41",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"verdict\": \"High risk: treat this shop with caution.\",\n  \"summary\": \"The domain was registered 12 days ago and the shop shows no company details or returns policy, while advertising 80% discounts.\",\n  \"top_concerns\": [\n    \"Brand-new domain\",\n    \"No way to contact the seller\",\n    \"Discounts that look too good to be true\"\n  ],\n  \"advice\": [\n    \"Don't pay by bank transfer; use a credit card or PayPal Goods & Services.\",\n    \"Search the shop name plus 'reviews' or 'scam' before ordering.\"\n  ]\n}"
+      },
+      "id": "5d0ccfbf-7ebb-51e1-9f03-2fffaca7ed8d",
+      "name": "Verdict format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1540,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n// Build the report in three shapes: HTML page (form), Telegram message, Sheets row.\nconst checks = $('Score the risk signals').all().map(i => i.json);\nreturn $input.all().map((item, i) => {\n  const c = checks[i] || {}; const a = item.json.output || {};\n  const icon = { low: '🟢', medium: '🟠', high: '🔴' }[c.risk_level] || '⚪';\n  const score = c.risk_score === null || c.risk_score === undefined ? 'n/a' : c.risk_score + '/100';\n  const verdict = c.valid === false ? 'This is not a valid web address, so it could not be checked.' : (a.verdict || `${c.risk_level} risk (${score})`);\n  const f = c.facts || {};\n  const factRows = Object.entries(f).filter(([k, v]) => v !== '' && v !== null && v !== undefined)\n    .map(([k, v]) => `<tr><td style=\"color:#64748b;padding:2px 10px 2px 0\">${esc(k.replace(/_/g, ' '))}</td><td>${esc(v)}</td></tr>`).join('');\n  const ul = xs => (xs || []).map(x => `<li>${esc(x)}</li>`).join('');\n  const html = `<div style=\"font-family:Arial,sans-serif;max-width:680px\"><h2>${icon} ${esc(c.host || c.url)}: ${esc(c.risk_level)} risk (${score})</h2>\n<p><b>${esc(verdict)}</b></p><p>${esc(a.summary || '')}</p>\n${(c.red_flags || []).length ? `<h3>Red flags</h3><ul>${ul(c.red_flags)}</ul>` : ''}${(c.green_flags || []).length ? `<h3>Good signs</h3><ul>${ul(c.green_flags)}</ul>` : ''}\n${(a.advice || []).length ? `<h3>What to do</h3><ul>${ul(a.advice)}</ul>` : ''}<h3>Checks</h3><table style=\"font-size:13px\">${factRows}</table>\n<p style=\"color:#94a3b8;font-size:12px\">Automated signals, not proof either way. Checked ${esc(c.checked_at)}.</p></div>`;\n  const tg = `${icon} <b>${esc(c.host || c.url)}</b>: <b>${esc(c.risk_level)}</b> risk (${score})\\n${esc(verdict)}\\n\\n` +\n    ((c.red_flags || []).length ? '🚩 ' + c.red_flags.slice(0, 6).map(esc).join('\\n🚩 ') + '\\n' : '') +\n    ((c.green_flags || []).length ? '✅ ' + c.green_flags.slice(0, 4).map(esc).join('\\n✅ ') + '\\n' : '') +\n    ((a.advice || []).length ? '\\n💡 ' + a.advice.map(esc).join('\\n💡 ') : '') + '\\n\\n<i>Automated signals, not proof.</i>';\n  const row = { checked_at: c.checked_at, url: c.url, domain: c.domain, risk_score: c.risk_score, risk_level: c.risk_level, verdict,\n    red_flags: (c.red_flags || []).join(' | '), green_flags: (c.green_flags || []).join(' | '), domain_age_days: f.domain_age_days ?? '',\n    registrar: f.registrar || '', safe_browsing: f.safe_browsing || '', source: c.channel, requested_by: c.requested_by || '' };\n  return { json: { ...row, channel: c.channel, chat_id: c.chat_id, row_number: c.row_number, html, tg: tg.slice(0, 4000), row } };\n});"
+      },
+      "id": "82526c45-e201-502c-828a-bcb22eb27529",
+      "name": "Build the report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Run the checks and score",
+        "height": 500,
+        "width": 1480,
+        "color": 7
+      },
+      "id": "c1349d73-e7fc-5c68-b62b-4fecec81e73e",
+      "name": "Section: Run the checks and score",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {
+          "formTitle": "Website check"
+        }
+      },
+      "id": "516aa9c6-88ca-5129-a5be-d1d785a82262",
+      "name": "Show the report",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Show the report",
+        "height": 300,
+        "width": 220,
+        "color": 7
+      },
+      "id": "1f35676f-f100-5ef9-ac93-0413c5ba6111",
+      "name": "Section: Show the report",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1940,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "dfb2a999-ae24-5a37-9d6a-09e73deec456",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "d69789c8-b36b-57cf-a898-b15da2acf5f0",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "454f22ac-0f1e-5024-8cd2-bacf403f058c",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write the verdict",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verdict format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write the verdict",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise the URL": {
+      "main": [
+        [
+          {
+            "node": "Fetch the page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch the page": {
+      "main": [
+        [
+          {
+            "node": "Look up domain age (RDAP)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Look up domain age (RDAP)": {
+      "main": [
+        [
+          {
+            "node": "Score the risk signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score the risk signals": {
+      "main": [
+        [
+          {
+            "node": "Write the verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write the verdict": {
+      "main": [
+        [
+          {
+            "node": "Build the report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check a website": {
+      "main": [
+        [
+          {
+            "node": "Set checker settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set checker settings": {
+      "main": [
+        [
+          {
+            "node": "Normalise the URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build the report": {
+      "main": [
+        [
+          {
+            "node": "Show the report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
