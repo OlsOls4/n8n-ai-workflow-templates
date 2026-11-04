@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Track job application emails from Gmail in Google Sheets with AI status detection\n\nStop losing track of where you applied. This workflow watches your Gmail for application confirmations, rejections, interview invites and offers, uses Google Gemini to work out the company, role and status, and keeps one row per application up to date in Google Sheets.\n\n### How it works\n1. **Check Gmail for application emails** polls every hour with a search that skips promotions and social mail.\n2. **Prepare email for AI** trims each email to the parts that matter.\n3. **Detect company, role and status** returns structured JSON (applied, assessment, interview, offer, rejected, recruiter outreach).\n4. Emails that are not about your own applications are dropped.\n5. **Update application in Google Sheets** upserts by company + role, so a rejection or interview invite updates the existing row instead of adding a new one.\n\n### Setup\n1. Add a **Gmail OAuth2** credential and a free **Google Gemini (PaLM) API** credential.\n2. Create a Google Sheet with an `Applications` tab and this header row: `application_key, company, role, status, next_step, deadline, last_update, last_subject, from, gmail_link`.\n3. Put the Sheet ID in **Config** and connect **Google Sheets**.\n4. Activate. The first poll reads only new emails from now on.\n\n### Customization\n- Tighten or widen the Gmail search in the trigger's *Search* filter.\n- Add more statuses (for example `withdrawn`) to the prompt and use conditional formatting in the sheet.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "content": "## Track job application emails from Gmail in Google Sheets with AI status detection\n\nStop losing track of where you applied. This workflow watches your Gmail for application confirmations, rejections, interview invites and offers, uses Google Gemini to work out the company, role and status, and keeps one row per application up to date in Google Sheets.\n\n### How it works\n1. **Check Gmail for application emails** polls every hour with a search that skips promotions and social mail.\n2. **Prepare email for AI** trims each email to the parts that matter.\n3. **Detect company, role and status** returns structured JSON (applied, assessment, interview, offer, rejected, recruiter outreach).\n4. Emails that are not about your own applications are dropped.\n5. **Update application in Google Sheets** upserts by company + role, so a rejection or interview invite updates the existing row instead of adding a new one.\n6. **Every Monday at 8am** a follow-up summary e-mail lists deadlines in the next 7 days, applications with no news for 7+ days (with thread links to chase them), this week's replies and your response rate.\n\n### Setup\n1. Add a **Gmail OAuth2** credential and a free **Google Gemini (PaLM) API** credential.\n2. Create a Google Sheet with an `Applications` tab and this header row: `application_key, company, role, status, next_step, deadline, last_update, last_subject, from, gmail_link`.\n3. Put the Sheet ID in **Config** and **Set summary settings** and connect **Google Sheets**.\n4. Put your e-mail address and follow-up delay in **Set summary settings**.\n5. Activate. The first poll reads only new emails from now on.\n\n### Customization\n- Tighten or widen the Gmail search in the trigger's *Search* filter.\n- Change `follow_up_after_days` or which statuses count as \"waiting\" in **Build follow-up summary**.\n- Add statuses (e.g. `withdrawn`) to the prompt.",
         "height": 900,
         "width": 600
       },
@@ -314,6 +314,179 @@
     },
     {
       "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "f521c012-4a56-58ce-9a1d-02902bbf9339",
+      "name": "Every Monday at 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        1800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ee11591b-8630-5d28-bf4d-adcfe770f607",
+              "name": "your_email",
+              "value": "YOUR_EMAIL_ADDRESS",
+              "type": "string"
+            },
+            {
+              "id": "55dc28d3-add4-5ae3-9019-383c35717021",
+              "name": "follow_up_after_days",
+              "value": 7,
+              "type": "number"
+            },
+            {
+              "id": "a9ef4be3-48a3-5375-b47c-6000fa550e11",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4dd09772-4376-56ee-a731-c66950933331",
+      "name": "Set summary settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set summary settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Applications"
+        },
+        "options": {}
+      },
+      "id": "e71ba0cf-b942-5ffe-9ea4-43849f763444",
+      "name": "Read all applications",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2280,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Who to chase this week: applications with no news for N+ days, deadlines in the next 7 days, and this week's changes\nconst cfg = $('Set summary settings').first().json;\nconst days = Number(cfg.follow_up_after_days) || 7;\nconst rows = $input.all().map(i => i.json).filter(r => r.application_key);\nconst now = DateTime.now();\nconst parse = v => { const d = DateTime.fromFormat(String(v || ''), 'yyyy-MM-dd HH:mm'); return d.isValid ? d : DateTime.fromISO(String(v || '')); };\nconst age = r => { const d = parse(r.last_update); return d.isValid ? Math.floor(now.diff(d, 'days').days) : null; };\nconst esc = t => String(t ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));\nconst link = r => r.gmail_link ? ` <a href=\"${r.gmail_link}\">open thread</a>` : '';\nconst waiting = rows.filter(r => ['applied', 'recruiter_outreach', 'assessment'].includes(r.status) && age(r) !== null && age(r) >= days)\n  .sort((a, b) => age(b) - age(a));\nconst soon = rows.filter(r => { const d = DateTime.fromISO(String(r.deadline || '')); return d.isValid && d >= now.startOf('day') && d <= now.plus({ days: 7 }); })\n  .sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)));\nconst changed = rows.filter(r => age(r) !== null && age(r) < 7 && !['applied', 'other'].includes(r.status));\nconst count = st => rows.filter(r => r.status === st).length;\nconst active = rows.filter(r => !['rejected', 'other'].includes(r.status)).length;\nconst responded = rows.filter(r => !['applied', 'other'].includes(r.status)).length;\nconst li = (r, extra) => `<li><b>${esc(r.company)}</b> – ${esc(r.role)} (${esc(r.status)}${extra})${link(r)}</li>`;\nconst html = `<h2>Your job search this week</h2>\n<p>${rows.length} applications, ${active} still open. Response rate ${rows.length ? Math.round(100 * responded / rows.length) : 0}%.<br>\nInterviews ${count('interview')} · Tests ${count('assessment')} · Offers ${count('offer')} · Rejections ${count('rejected')}</p>\n<h3>⏰ Deadlines in the next 7 days (${soon.length})</h3><ul>${soon.map(r => li(r, ', due ' + esc(r.deadline))).join('') || '<li>None</li>'}</ul>\n<h3>✉️ Worth a follow-up: no news for ${days}+ days (${waiting.length})</h3><ul>${waiting.map(r => li(r, ', ' + age(r) + ' days')).join('') || '<li>Nobody to chase this week</li>'}</ul>\n${waiting.length ? '<p>Tip: reply in the original thread with one line restating your interest and ask about the timeline.</p>' : ''}\n<h3>📬 Updates this week (${changed.length})</h3><ul>${changed.map(r => li(r, esc(r.next_step ? ': ' + r.next_step : ''))).join('') || '<li>No new replies</li>'}</ul>`;\nreturn [{ json: { to: cfg.your_email, subject: `Job search: ${waiting.length} to follow up, ${soon.length} deadline${soon.length === 1 ? '' : 's'} this week`,\n  html, applications: rows.length, follow_ups: waiting.length, deadlines: soon.length } }];"
+      },
+      "id": "3e3ac4c0-afa4-5981-90c2-8b525bbbd498",
+      "name": "Build follow-up summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "37975366-5c48-58c0-94b9-25aa0e3a4d21",
+              "leftValue": "={{ $json.applications }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f7674ebc-02c3-5bc8-a84a-390fa8ca4de7",
+      "name": "Any applications tracked?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        2760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "050afe8c-2185-5d52-888c-568a9fde3682",
+      "name": "Email the follow-up summary",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3000,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 4. Monday follow-up summary",
+        "height": 300,
+        "width": 1420,
+        "color": 7
+      },
+      "id": "36740dcf-60dd-566b-92a5-f600fd64a333",
+      "name": "Section: Monday follow-up summary",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        180
+      ]
+    },
+    {
+      "parameters": {
         "assignments": {
           "assignments": [
             {
@@ -359,7 +532,7 @@
       },
       "name": "Email the error",
       "type": "n8n-nodes-base.gmail",
-      "typeVersion": 2.1,
+      "typeVersion": 2.2,
       "credentials": {
         "gmailOAuth2": {
           "name": "Gmail account"
@@ -449,6 +622,61 @@
         [
           {
             "node": "Update application in Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Monday at 8am": {
+      "main": [
+        [
+          {
+            "node": "Set summary settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set summary settings": {
+      "main": [
+        [
+          {
+            "node": "Read all applications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read all applications": {
+      "main": [
+        [
+          {
+            "node": "Build follow-up summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build follow-up summary": {
+      "main": [
+        [
+          {
+            "node": "Any applications tracked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any applications tracked?": {
+      "main": [
+        [
+          {
+            "node": "Email the follow-up summary",
             "type": "main",
             "index": 0
           }
