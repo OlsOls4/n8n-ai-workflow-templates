@@ -1,0 +1,1042 @@
+{
+  "name": "Find local business leads from OpenStreetMap with website checks and AI openers in Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Find local business leads from OpenStreetMap with website checks and AI openers in Google Sheets\n\nType a business category and a town into a form and get a scored lead list in Google Sheets: name, address, phone, e-mail, website, social profiles, the problems with their website and a personalised first line for your cold e-mail. Everything comes from free sources: OpenStreetMap's Nominatim search and each business's own homepage. No Google Maps or scraping API to pay for.\n\n### How it works\n1. **Lead search form** asks for the category (dentist, cafe, plumber...), the town and how many leads.\n2. Nominatim finds the town's area, then the businesses inside it (one request per second, as its policy requires).\n3. **Clean and dedupe businesses** drops roads and bus stops and reads phone, e-mail and website tags.\n4. Each website is fetched once: e-mails, phones, socials, HTTPS, mobile tag, copyright year and booking links.\n5. Gemini scores how well each business fits what you sell and writes a short, specific opener.\n6. Leads are upserted into your `Leads` tab and the best ones appear on the form's result page.\n\n### Setup\n1. Add **Google Gemini (PaLM) API** and **Google Sheets** credentials.\n2. Create a sheet with a `Leads` tab (columns in the README) and put the Sheet ID and your contact e-mail in **Set lead finder settings**.\n3. Describe what you sell in the same node, activate and open the form.\n\nOpenStreetMap has fewer businesses than Google Maps, so expect thinner lists in small towns.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "51d6003c-dc37-5fa4-8e8b-990e05fd08b5",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Find local business leads",
+        "formDescription": "Free OpenStreetMap data. Each website is checked and every lead gets an AI fit score and opener.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Business category",
+              "fieldName": "category",
+              "fieldType": "text",
+              "requiredField": true,
+              "placeholder": "e.g. dentist, cafe, hairdresser, plumber"
+            },
+            {
+              "fieldLabel": "Town or city",
+              "fieldName": "city",
+              "fieldType": "text",
+              "requiredField": true,
+              "placeholder": "e.g. Bristol, UK"
+            },
+            {
+              "fieldLabel": "How many leads (max)",
+              "fieldName": "max_results",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "10"
+                  },
+                  {
+                    "option": "20"
+                  },
+                  {
+                    "option": "40"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Find leads"
+        }
+      },
+      "id": "a83c62c9-8c28-5af4-b442-09895662f968",
+      "name": "Lead search form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "b702763f-fa99-5a7d-bb40-73b37338b395"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1c1000e4-8b72-5534-bb6f-001a4eb50702",
+              "name": "your_service",
+              "value": "Website design, online booking and local SEO for small businesses",
+              "type": "string"
+            },
+            {
+              "id": "d7a7c1f4-0639-58a6-8067-cc9a0fd79b6c",
+              "name": "ideal_customer",
+              "value": "Independent local businesses with 1-20 staff that rely on local customers finding them online",
+              "type": "string"
+            },
+            {
+              "id": "22e92e06-ac91-5d56-b8f6-0569cf71545b",
+              "name": "user_agent",
+              "value": "LocalLeadFinder/1.0 (n8n workflow; YOUR_CONTACT_EMAIL)",
+              "type": "string"
+            },
+            {
+              "id": "04d3057a-ea08-5838-8c38-f51de2631ecb",
+              "name": "language",
+              "value": "British English",
+              "type": "string"
+            },
+            {
+              "id": "8a12747f-66f0-5676-b98f-4a738002c67c",
+              "name": "min_score_hot",
+              "value": 70,
+              "type": "number"
+            },
+            {
+              "id": "70b1957e-3e85-54a3-b305-02f3e33329f2",
+              "name": "only_inside_town",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "6bed9317-9367-5f50-9f8c-f86438ad1411",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {},
+        "includeOtherFields": true
+      },
+      "id": "106b0d73-bf6a-5da6-82b1-7de9380f91ae",
+      "name": "Set lead finder settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Describe the search",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "71db5b98-ea26-50c7-984f-396e74b76326",
+      "name": "Section: Describe the search",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://nominatim.openstreetmap.org/search",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.city }}"
+            },
+            {
+              "name": "format",
+              "value": "jsonv2"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Set lead finder settings').first().json.user_agent }}"
+            }
+          ]
+        }
+      },
+      "id": "732b1bf3-ae50-5147-8046-b020fa64f83d",
+      "name": "Find the town on OpenStreetMap",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nominatim boundingbox = [south, north, west, east] -> viewbox = west,north,east,south\nconst s = $('Set lead finder settings').first().json;\nconst b = $json.boundingbox;\nif (!b) return [{ json: { found: false, message: `Couldn't find \"${s.city}\" on OpenStreetMap. Try adding the country, e.g. \"Bath, UK\".` } }];\nreturn [{ json: { found: true, category: String(s.category).trim(), city: s.city, max_results: Number(s.max_results) || 20,\n  viewbox: `${b[2]},${b[1]},${b[3]},${b[0]}`, town: $json.display_name } }];"
+      },
+      "id": "ac0ed3de-70d2-5070-b2f7-dcfa4dddcc8c",
+      "name": "Build search area",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e168ab5e-241b-5abf-934b-2e88070e17a0",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9e1f9f6b-a23c-550e-8ec3-443633f0c45a",
+      "name": "Town found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 1.1,
+        "unit": "seconds"
+      },
+      "id": "26f61bfe-034e-5e3e-bcd2-3c3f80e19648",
+      "name": "Wait 1 second (Nominatim policy)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1160,
+        0
+      ],
+      "webhookId": "be28c945-9d04-5510-b0c0-d206a7fe11c0"
+    },
+    {
+      "parameters": {
+        "url": "https://nominatim.openstreetmap.org/search",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.category }}"
+            },
+            {
+              "name": "format",
+              "value": "jsonv2"
+            },
+            {
+              "name": "limit",
+              "value": "={{ Math.min(Number($json.max_results) || 20, 40) }}"
+            },
+            {
+              "name": "extratags",
+              "value": "1"
+            },
+            {
+              "name": "addressdetails",
+              "value": "1"
+            },
+            {
+              "name": "viewbox",
+              "value": "={{ $json.viewbox }}"
+            },
+            {
+              "name": "bounded",
+              "value": "1"
+            },
+            {
+              "name": "accept-language",
+              "value": "en"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "={{ $('Set lead finder settings').first().json.user_agent }}"
+            }
+          ]
+        }
+      },
+      "id": "983fdfca-cec2-534a-837d-8d55aec2de80",
+      "name": "Search businesses in the area",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1400,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten the OpenStreetMap results, keep named businesses, dedupe (OSM id, then name + postcode) and read contact tags\nconst s = $('Set lead finder settings').first().json;\nconst KEEP = ['amenity', 'shop', 'craft', 'office', 'healthcare', 'leisure', 'tourism', 'club', 'building', 'emergency'];\nconst seen = new Set(), seenName = new Set(), perSearch = {}, out = [];\nlet searched = '';\n$input.all().forEach((item, i) => {\n  const { places, ctx } = { places: [item.json], ctx: { category: s.category, city: s.city, max_results: s.max_results } };\n  const search = `${ctx.category} in ${ctx.city}`;\n  const townKey = String(ctx.city || '').split(',')[0].trim().toLowerCase();  // a town's box can reach into the next town\n  searched = searched || search;\n  const cap = Number(ctx.max_results) || 40;\n  for (const p of places || []) {\n    if (!p || !p.osm_id || !p.name) continue;\n    const t = p.extratags || {};\n    const site = t.website || t['contact:website'] || t.url || '';\n    if (!KEEP.includes(p.category) && !site && !t.phone && !t['contact:phone']) continue;  // bus stops, roads, areas\n    if (s.only_inside_town !== false && townKey.length > 2 && !String(p.display_name || '').toLowerCase().includes(townKey)) continue;\n    const id = `osm-${p.osm_type}-${p.osm_id}`;\n    const a = p.address || {};\n    const postcode = a.postcode || '';\n    const nameKey = String(p.name).toLowerCase().replace(/[^a-z0-9]/g, '') + '|' + postcode.replace(/\\s/g, '').toLowerCase();\n    if (seen.has(id) || seenName.has(nameKey)) continue;\n    perSearch[search] = perSearch[search] || 0;\n    if (perSearch[search] >= cap) continue;\n    seen.add(id); seenName.add(nameKey); perSearch[search]++;\n    const town = a.city || a.town || a.village || a.suburb || ctx.city;\n    const street = [a.house_number, a.road].filter(Boolean).join(' ');\n    let website = String(site).trim();\n    if (website && !/^https?:\\/\\//i.test(website)) website = 'http://' + website;\n    out.push({ json: {\n      lead_id: id, search, category: String(p.type || ctx.category).replace(/_/g, ' '), name: p.name,\n      address: [street, a.suburb, town, postcode].filter(Boolean).join(', ') || p.display_name, postcode, city: town,\n      phone: t.phone || t['contact:phone'] || t['contact:mobile'] || '', email: t.email || t['contact:email'] || '',\n      website, facebook: t['contact:facebook'] || t.facebook || '', instagram: t['contact:instagram'] || t.instagram || '',\n      linkedin: t['contact:linkedin'] || '', opening_hours: t.opening_hours || '',\n      osm_url: `https://www.openstreetmap.org/${p.osm_type}/${p.osm_id}`,\n      maps_url: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(`${p.name} ${postcode || town}`),\n      lat: p.lat, lon: p.lon,\n    } });\n  }\n});\nif (!out.length) return [{ json: { no_results: true, message: `No businesses found for \"${searched || s.category + ' in ' + s.city}\" on OpenStreetMap. Try a common word such as dentist, cafe, restaurant, hairdresser, plumber or estate agent, or a larger town.` } }];\nreturn out;"
+      },
+      "id": "d350af35-e791-51a6-843a-60c1077574f6",
+      "name": "Clean and dedupe businesses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "73b13ea8-8f35-508d-b05d-b9e375abd9d6",
+              "leftValue": "={{ $json.no_results === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "7ca9888b-79ac-594c-b4e3-e01324b40246",
+      "name": "No businesses found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.message }}",
+        "options": {
+          "formTitle": "Town not found"
+        }
+      },
+      "id": "d294b0b7-1912-5eeb-8bdf-5fe8dc0120e0",
+      "name": "Show town not found",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1160,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.message }}",
+        "options": {
+          "formTitle": "No businesses found"
+        }
+      },
+      "id": "f443aab3-2ca1-52fa-b5cd-6ae632c1fe65",
+      "name": "Show no results",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2120,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Find businesses on OpenStreetMap",
+        "height": 520,
+        "width": 1900,
+        "color": 7
+      },
+      "id": "324687a0-1669-5684-8831-7f0f82058323",
+      "name": "Section: Find businesses on OpenStreetMap",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "84f62392-2c65-5ad5-962f-843fd6333498",
+              "leftValue": "={{ $json.website }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f4934ce1-3535-5dd0-9758-d3e70e589cd4",
+      "name": "Has a website?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.website }}",
+        "options": {
+          "timeout": 12000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text",
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 1000
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            }
+          ]
+        }
+      },
+      "id": "9c6eb90e-1c3c-5ca8-a4cc-4ed6e6120a74",
+      "name": "Fetch the homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2660,
+        -160
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read the homepage: emails, phones, social profiles and quick website-quality checks (HTTPS, mobile, booking, freshness)\nconst year = new Date().getFullYear();\nconst BAD_MAIL = /\\.(png|jpe?g|gif|webp|svg|css|js)$|@(example|sentry|wixpress|sentry-next|domain|email)\\.|^u00|@2x/;\nreturn $input.all().map((item, i) => {\n  const lead = $('Has a website?').itemMatching(i).json;\n  const r = item.json || {};\n  const html = String(r.body ?? r.data ?? '');\n  const status = Number(r.statusCode) || (r.error ? 0 : (html ? 200 : 0));\n  const text = html.replace(/<script[\\s\\S]*?<\\/script>|<style[\\s\\S]*?<\\/style>|<noscript[\\s\\S]*?<\\/noscript>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/\\s+/g, ' ').trim();\n  const emails = [...new Set([...(html.match(/mailto:([^\"'?>\\s]+)/gi) || []).map(m => m.slice(7)),\n    ...(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi) || [])].map(e => decodeURIComponent(e).toLowerCase().trim()))].filter(e => !BAD_MAIL.test(e));\n  const phones = [...new Set((html.match(/tel:([+0-9()\\s.-]{7,})/gi) || []).map(t => t.slice(4).trim()))];\n  const pick = rx => { const m = html.match(rx); return m ? m[0].replace(/[\"'<>].*$/, '') : ''; };\n  const facebook = lead.facebook || pick(/https?:\\/\\/(www\\.)?facebook\\.com\\/(?!sharer|share|plugins|tr\\b|dialog)[A-Za-z0-9_.\\-\\/]+/i);\n  const instagram = lead.instagram || pick(/https?:\\/\\/(www\\.)?instagram\\.com\\/(?!p\\/|explore)[A-Za-z0-9_.\\-]+/i);\n  const linkedin = lead.linkedin || pick(/https?:\\/\\/([a-z]{2,3}\\.)?linkedin\\.com\\/(company|in)\\/[A-Za-z0-9_\\-%]+/i);\n  const others = ['tiktok\\\\.com\\\\/@[A-Za-z0-9_.]+', '(twitter|x)\\\\.com\\\\/(?!share|intent|home)[A-Za-z0-9_]+', 'youtube\\\\.com\\\\/(@|channel\\\\/|c\\\\/)[A-Za-z0-9_\\\\-]+']\n    .map(p => pick(new RegExp('https?:\\\\/\\\\/(www\\\\.)?' + p, 'i'))).filter(Boolean);\n  const title = ((html.match(/<title[^>]*>([^<]*)/i) || [])[1] || '').trim().slice(0, 120);\n  const desc = ((html.match(/<meta[^>]+name=[\"']description[\"'][^>]*content=[\"']([^\"']*)/i) || [])[1] || '').slice(0, 200);\n  const mobile = /<meta[^>]+name=[\"']viewport[\"']/i.test(html);\n  const https = /^https:/i.test(lead.website);\n  const cy = [...text.matchAll(/(?:©|&copy;|copyright)\\s*(?:\\d{4}\\s*[-–]\\s*)?(\\d{4})/gi)].map(m => Number(m[1])).filter(y => y > 1995 && y <= year);\n  const copyright = cy.length ? Math.max(...cy) : null;\n  const booking = /(book (now|online|a table|an appointment)|booking|calendly\\.com|fresha\\.com|treatwell|setmore|simplybook|opentable|resdiary|acuityscheduling|squareup\\.com\\/appointments)/i.test(html);\n  const gen = ((html.match(/<meta[^>]+name=[\"']generator[\"'][^>]*content=[\"']([^\"']*)/i) || [])[1] || '');\n  const cms = /wix\\.com|wixstatic/i.test(html) ? 'Wix' : /squarespace/i.test(html) ? 'Squarespace' : /wp-content|wordpress/i.test(html + gen) ? 'WordPress'\n    : /cdn\\.shopify|shopify/i.test(html) ? 'Shopify' : /godaddy|websitebuilder/i.test(html) ? 'GoDaddy builder' : gen.split(' ')[0] || '';\n  const contactHref = ((html.match(/href=[\"']([^\"'#]*contact[^\"'#]*)[\"']/i) || [])[1] || '');\n  let contact_url = '';\n  try { if (contactHref) contact_url = new URL(contactHref, lead.website).href; } catch (e) {}\n  const words = text.split(' ').length;\n  const issues = [];\n  const blocked = [401, 403, 429, 503].includes(status);  // bot protection: the site may be fine in a browser\n  if (blocked) {}\n  else if (!status || status >= 400) issues.push(status === 404 ? 'website link is broken (404)' : `site not loading (${status || 'no response'})`);\n  else {\n    if (!https) issues.push('no HTTPS');\n    if (!mobile) issues.push('not mobile-friendly (no viewport tag)');\n    if (copyright && copyright < year - 2) issues.push(`copyright ${copyright}`);\n    if (!desc) issues.push('no meta description');\n    if (words < 150) issues.push('very little text');\n    if (!booking && /restaurant|cafe|dentist|hairdresser|beauty|salon|clinic|physio|barber|spa|massage|gym|vet/i.test(lead.category)) issues.push('no online booking');\n  }\n  const site_score = blocked ? '' : Math.max(0, 100 - issues.length * 18 - (!status || status >= 400 ? 40 : 0));\n  return { json: { ...lead, email: lead.email || emails[0] || '', other_emails: emails.slice(1, 3).join(', '),\n    phone: lead.phone || phones[0] || '', facebook, instagram, linkedin, other_socials: others.join(' '),\n    site_status: blocked ? `${status} (blocks automated checks)` : status, site_title: title, site_description: desc, site_cms: cms, site_copyright: copyright || '',\n    site_has_booking: booking ? 'yes' : 'no', site_issues: issues.join('; '), site_score, contact_url,\n    site_text: text.slice(0, 1500) } };\n});"
+      },
+      "id": "2d023b4c-90f2-5525-b87e-404b01543b95",
+      "name": "Read contact details from the site",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2900,
+        -160
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "223b2fba-b676-5f19-ae8c-81af57a79c0c",
+      "name": "Combine leads",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Check each website",
+        "height": 460,
+        "width": 940,
+        "color": 7
+      },
+      "id": "7c841265-ec52-5c2a-9323-305944eb74ae",
+      "name": "Section: Check each website",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2360,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You qualify local businesses as sales leads for me.\n\nWhat I sell: {{ $('Set lead finder settings').first().json.your_service }}\nMy ideal customer: {{ $('Set lead finder settings').first().json.ideal_customer }}\n\nBusiness: {{ $json.name }} ({{ $json.category }})\nAddress: {{ $json.address }}\nWebsite: {{ $json.website || 'none listed on OpenStreetMap' }}\nPhone: {{ $json.phone || 'not found' }} | E-mail: {{ $json.email || 'not found' }}\nSocial profiles: {{ [$json.facebook, $json.instagram, $json.linkedin, $json.other_socials].filter(Boolean).join(' ') || 'none found' }}\nOpening hours listed: {{ $json.opening_hours || 'unknown' }}\nWebsite check: {{ $json.website ? ('status ' + $json.site_status + ', built with ' + ($json.site_cms || 'unknown') + ', online booking: ' + $json.site_has_booking) : 'no website' }}\nWebsite issues: {{ $json.site_issues || ($json.website ? (String($json.site_status).includes('blocks') ? 'not checked: the site blocks automated requests, so say nothing about its quality' : 'none detected') : 'no website at all') }}\nHomepage title: {{ $json.site_title || '-' }}\nHomepage text sample: {{ ($json.site_text || '').slice(0, 900) }}\n\nRules:\n- fit_score 0-100: how likely this business needs AND can pay for what I sell. A missing website or website problems only raise the score when what I sell fixes them.\n- reasons: 2-3 short, factual reasons based only on the facts above. Never say the website is broken or down unless the website issues say so.\n- opener: 1-2 sentences for a cold e-mail that mention one specific, true detail from the facts above and link it to what I sell. Under 45 words, no flattery cliches (\"I came across your amazing business\"), no exclamation marks, no invented names, reviews or numbers.\n- subject_line: under 7 words, plain, no clickbait.\n- Write in {{ $('Set lead finder settings').first().json.language }}.",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 2,
+          "delayBetweenBatches": 4000
+        }
+      },
+      "id": "67ccde7d-fd7e-5940-b7ff-6ad6e5843b89",
+      "name": "Score fit and write opener",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        3440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "57cd306c-ea2a-5d27-afbc-1b241d09da45",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        3440,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"fit_score\": 78,\n  \"priority\": \"high\",\n  \"reasons\": [\n    \"No HTTPS and no mobile viewport on the homepage\",\n    \"Appointment-based business with no online booking\"\n  ],\n  \"pitch_angle\": \"Mobile-friendly site with online booking\",\n  \"opener\": \"I noticed Smile Studio's site still asks patients to phone for appointments and isn't set up for mobile, which is where most local searches happen now.\",\n  \"subject_line\": \"online booking for smile studio\"\n}"
+      },
+      "id": "ce67079e-91f3-57f0-a608-3853a8537887",
+      "name": "Lead verdict format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        3580,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge the AI verdict with the business data -> one row per lead for the Leads tab\nconst s = $('Set lead finder settings').first().json;\nconst hot = Number(s.min_score_hot) || 70;\nconst leads = $('Combine leads').all();\nreturn $input.all().map((item, i) => {\n  const l = (leads[i] || {}).json || {};\n  const o = item.json.output || {};\n  const score = Math.max(0, Math.min(100, Math.round(Number(o.fit_score) || 0)));\n  return { json: {\n    lead_id: l.lead_id, found_at: $now.toFormat('yyyy-MM-dd HH:mm'), search: l.search, name: l.name, category: l.category,\n    address: l.address, postcode: l.postcode, city: l.city, phone: l.phone, email: l.email, other_emails: l.other_emails || '',\n    website: l.website, facebook: l.facebook, instagram: l.instagram, linkedin: l.linkedin, other_socials: l.other_socials || '',\n    opening_hours: l.opening_hours, has_website: l.website ? 'yes' : 'no', site_status: l.site_status || '',\n    site_issues: l.site_issues || (l.website ? '' : 'no website'), site_score: l.website ? l.site_score : 0,\n    fit_score: score, priority: score >= hot ? 'high' : score >= 45 ? 'medium' : 'low',\n    reasons: (o.reasons || []).join('; '), pitch_angle: o.pitch_angle || '', opener: o.opener || '', subject_line: o.subject_line || '',\n    osm_url: l.osm_url, maps_url: l.maps_url, status: 'new',\n  } };\n});"
+      },
+      "id": "90c50c12-536c-5e30-8881-e43b150ed58c",
+      "name": "Build lead rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. Score fit and write an opener with AI",
+        "height": 500,
+        "width": 540,
+        "color": 7
+      },
+      "id": "3dd507a0-3cec-535f-a965-7b8c16e04112",
+      "name": "Section: Score fit and write an opener with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3380,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set lead finder settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "9730808f-3f9c-512e-b873-a9c10bcff11c",
+      "name": "Save leads to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        4060,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// One summary item for the results page\nconst rows = $('Build lead rows').all().map(i => i.json).sort((a, b) => b.fit_score - a.fit_score);\nconst high = rows.filter(r => r.priority === 'high').length;\nconst noSite = rows.filter(r => r.has_website === 'no').length;\nconst withEmail = rows.filter(r => r.email).length;\nconst top = rows.slice(0, 8).map(r => `<tr><td><b>${esc(r.name)}</b><br><small>${esc(r.address)}</small></td><td>${r.fit_score}</td><td>${esc(r.site_issues || '-')}</td><td>${esc(r.opener)}</td></tr>`).join('');\nreturn [{ json: { count: rows.length, high, html: `<p><b>${rows.length}</b> leads saved to your Leads sheet: ${high} high priority, ${withEmail} with an e-mail, ${noSite} without a website.</p>\n<table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse;font-size:13px\"><tr><th>Business</th><th>Fit</th><th>Website issues</th><th>Opener</th></tr>${top}</table>` } }];"
+      },
+      "id": "58cacf66-2bef-52e0-8e4d-0f33e5f71a4c",
+      "name": "Build results page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4300,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {
+          "formTitle": "Your leads"
+        }
+      },
+      "id": "bcf69bd3-ecff-541d-9c78-9b4ee8fcdf66",
+      "name": "Show the leads",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        4540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 5. Save leads and show results",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "28de390b-9902-514c-a35d-0050f1efc6f0",
+      "name": "Section: Save leads and show results",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4000,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8b80f778-0acf-55cc-aaab-905df031f203",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "7279bc79-e429-51d0-8b99-a2247793e904",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "71bdca2a-ba3d-5f97-b6fd-c3f072bd03cf",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Lead search form": {
+      "main": [
+        [
+          {
+            "node": "Set lead finder settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set lead finder settings": {
+      "main": [
+        [
+          {
+            "node": "Find the town on OpenStreetMap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find the town on OpenStreetMap": {
+      "main": [
+        [
+          {
+            "node": "Build search area",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build search area": {
+      "main": [
+        [
+          {
+            "node": "Town found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Town found?": {
+      "main": [
+        [
+          {
+            "node": "Wait 1 second (Nominatim policy)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show town not found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1 second (Nominatim policy)": {
+      "main": [
+        [
+          {
+            "node": "Search businesses in the area",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search businesses in the area": {
+      "main": [
+        [
+          {
+            "node": "Clean and dedupe businesses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean and dedupe businesses": {
+      "main": [
+        [
+          {
+            "node": "No businesses found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No businesses found?": {
+      "main": [
+        [
+          {
+            "node": "Show no results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has a website?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has a website?": {
+      "main": [
+        [
+          {
+            "node": "Fetch the homepage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Combine leads",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Fetch the homepage": {
+      "main": [
+        [
+          {
+            "node": "Read contact details from the site",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read contact details from the site": {
+      "main": [
+        [
+          {
+            "node": "Combine leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score fit and write opener",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead verdict format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score fit and write opener",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine leads": {
+      "main": [
+        [
+          {
+            "node": "Score fit and write opener",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score fit and write opener": {
+      "main": [
+        [
+          {
+            "node": "Build lead rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build lead rows": {
+      "main": [
+        [
+          {
+            "node": "Save leads to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save leads to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Build results page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build results page": {
+      "main": [
+        [
+          {
+            "node": "Show the leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
