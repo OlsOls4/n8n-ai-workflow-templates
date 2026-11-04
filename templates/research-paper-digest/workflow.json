@@ -1,0 +1,529 @@
+{
+  "name": "Send a weekly arXiv research digest with AI TL;DRs and relevance scores using Gemini and Gmail",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Send a weekly arXiv research digest with AI TL;DRs and relevance scores using Gemini and Gmail\n\nStop skimming arXiv by hand. Every Monday this workflow searches arXiv for your topics, skips papers you've already been sent, asks Gemini for a one-line TL;DR and a 1-10 relevance score for *your* interests, and e-mails you the papers worth reading, best first. Free: arXiv's API needs no key and Gemini's free tier covers it.\n\n### How it works\n1. **Every Monday at 7am** starts the run; **Set digest settings** holds your topics (one per line), interests, look-back days and e-mail.\n2. **Search arXiv** runs one query per topic (newest first, 3.5 s apart as arXiv asks).\n3. **Read the papers** parses the feed, drops anything older than the look-back window and de-duplicates across topics.\n4. **Skip papers already sent** remembers paper IDs between runs.\n5. **TL;DR and relevance** (Gemini + Structured Output Parser) summarises each abstract and scores it.\n6. **Build the digest** keeps papers at or above `min_relevance` and **Send the digest** e-mails them.\n\n### Setup\n1. Add **Google Gemini (PaLM) API** and **Gmail** credentials.\n2. Edit **Set digest settings**: topics, `research_profile` (a sentence about what you care about) and your e-mail address.\n3. Run once to test, then activate.\n\nThe Pro version adds OpenAlex (journals, citations), a Google Sheets library, structured method/result/limitations notes and a PDF summariser form.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1040,
+        "width": 600
+      },
+      "id": "b25399b1-14cf-52ce-ad2a-c03f828aa3e6",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "8cd28100-8cc3-5cbd-a8df-afa4fc9d0057",
+      "name": "Every Monday at 7am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2e431ed0-e76c-51dc-80e0-f21e1e72ea31",
+              "name": "topics",
+              "value": "retrieval augmented generation\nLLM agents evaluation",
+              "type": "string"
+            },
+            {
+              "id": "b0b56f0d-998d-5de4-824b-7a737edfe570",
+              "name": "research_profile",
+              "value": "I build LLM products and care about practical techniques that make answers more reliable.",
+              "type": "string"
+            },
+            {
+              "id": "3560b340-d42a-5a3c-8dfc-6999e8d05ec5",
+              "name": "arxiv_categories",
+              "value": "cs.CL, cs.AI, cs.LG",
+              "type": "string"
+            },
+            {
+              "id": "a2c721e9-f6e3-592e-aeb6-b21599a25f7b",
+              "name": "days_back",
+              "value": 7,
+              "type": "number"
+            },
+            {
+              "id": "7daa90b0-b15d-5b33-8399-5747dbaa6972",
+              "name": "max_per_topic",
+              "value": 25,
+              "type": "number"
+            },
+            {
+              "id": "e064e156-ecc0-5c33-8a23-ba2685b968e6",
+              "name": "max_papers",
+              "value": 25,
+              "type": "number"
+            },
+            {
+              "id": "e913b839-2f61-5c53-bf0d-f36a8503b510",
+              "name": "min_relevance",
+              "value": 6,
+              "type": "number"
+            },
+            {
+              "id": "7a848a4a-9bce-54f7-863e-f0da4adda34c",
+              "name": "email",
+              "value": "YOUR_EMAIL",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f560cf61-a821-585f-8225-fd8198cdf8d8",
+      "name": "Set digest settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per topic with ready-made arXiv and OpenAlex queries.\nconst s = $('Set digest settings').first().json;\nconst topics = String(s.topics || '').split(/\\n|;/).map(t => t.trim()).filter(Boolean);\nconst cats = String(s.arxiv_categories || '').split(/[\\s,]+/).filter(Boolean);\nconst since = new Date(Date.now() - (Number(s.days_back) || 7) * 864e5).toISOString().slice(0, 10);\nreturn topics.map(topic => {\n  const words = topic.includes(' ') ? `all:\"${topic.replace(/\"/g, '')}\"` : `all:${topic}`;\n  const q = cats.length ? `(${words}) AND (${cats.map(c => 'cat:' + c).join(' OR ')})` : words;\n  return { json: { topic, since, arxiv_query: q, per_topic: Number(s.max_per_topic) || 25 } };\n});"
+      },
+      "id": "73898f88-93a7-56d6-8a07-ff92c63df0b6",
+      "name": "One item per topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://export.arxiv.org/api/query?search_query=' + encodeURIComponent($json.arxiv_query) + '&sortBy=submittedDate&sortOrder=descending&max_results=' + $json.per_topic }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 3500
+            }
+          }
+        }
+      },
+      "id": "e1e81e14-485e-5693-9d3e-f38a755a46da",
+      "name": "Search arXiv",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        620,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const dec = s => String(s || '').replace(/<!\\[CDATA\\[|\\]\\]>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"')\n  .replace(/&#39;|&apos;/g, \"'\").replace(/&amp;/g, '&').replace(/\\s+/g, ' ').trim();\nconst tag = (x, t) => (x.match(new RegExp('<' + t + '[^>]*>([\\\\s\\\\S]*?)</' + t + '>')) || [])[1] || '';\nfunction parseArxiv(xml, topic) {\n  return String(xml || '').split('<entry>').slice(1).map(e => {\n    const idUrl = dec(tag(e, 'id'));\n    const id = idUrl.replace(/^https?:\\/\\/arxiv\\.org\\/abs\\//, '').replace(/v\\d+$/, '');\n    const authors = [...e.matchAll(/<name>([\\s\\S]*?)<\\/name>/g)].map(m => dec(m[1]));\n    const pdf = (e.match(/<link[^>]*title=\"pdf\"[^>]*href=\"([^\"]+)\"/) || e.match(/<link[^>]*href=\"([^\"]+)\"[^>]*title=\"pdf\"/) || [])[1] || '';\n    return { paper_id: 'arxiv:' + id, title: dec(tag(e, 'title')), abstract: dec(tag(e, 'summary')), authors: authors.slice(0, 8).join(', ') + (authors.length > 8 ? ' et al.' : ''),\n      published: dec(tag(e, 'published')).slice(0, 10), url: 'https://arxiv.org/abs/' + id, pdf_url: pdf.replace('http://', 'https://'),\n      doi: dec(tag(e, 'arxiv:doi')).toLowerCase(), venue: 'arXiv ' + ((e.match(/<arxiv:primary_category[^>]*term=\"([^\"]+)\"/) || [])[1] || ''),\n      citations: '', source: 'arXiv', topic };\n  }).filter(p => p.title && !/^error$/i.test(p.title));\n}\n\n// Parse each topic's Atom feed, keep the look-back window, de-duplicate across topics.\nconst topics = $('One item per topic').all().map(i => i.json);\nconst since = topics[0]?.since || '1900-01-01';\nconst seen = new Set(); const out = [];\n$input.all().forEach((item, i) => {\n  for (const p of parseArxiv(item.json.data, topics[i]?.topic || '')) {\n    if (p.published < since || seen.has(p.paper_id)) continue;\n    seen.add(p.paper_id); out.push({ json: p });\n  }\n});\nreturn out;"
+      },
+      "id": "6161766f-863e-55f8-833d-bd94f59f5af3",
+      "name": "Read the papers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Topics and search",
+        "height": 300,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "725063d9-c0f7-59aa-97d6-993d38bb1b1b",
+      "name": "Section: Topics and search",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.paper_id }}",
+        "options": {}
+      },
+      "id": "622bb074-d5e2-506e-a963-259dc05f8150",
+      "name": "Skip papers already sent",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "maxItems": "={{ $('Set digest settings').first().json.max_papers }}"
+      },
+      "id": "22592dc3-8f83-5bd7-b571-9752ebb8951d",
+      "name": "Keep the newest papers",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Reader's interests: \"{{ $('Set digest settings').first().json.research_profile }}\"\n\nTitle: {{ $json.title }}\nAbstract: {{ $json.abstract }}\n\nReturn tldr (one plain-English sentence, max 30 words, only facts from the abstract), relevance (1-10 for this reader) and why (under 15 words).",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 2,
+          "delayBetweenBatches": 4000
+        }
+      },
+      "id": "ee98414c-3fdf-58ef-bbfa-fea344e435fe",
+      "name": "TL;DR and relevance",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1640,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "484ce779-2beb-57e7-aeb2-1cea7fed49fb",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1640,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"tldr\": \"A small re-ranking model cuts RAG hallucinations by a third on three QA benchmarks.\",\n  \"relevance\": 7,\n  \"why\": \"Practical technique for more reliable RAG answers.\"\n}"
+      },
+      "id": "aadcce0b-229d-55dd-881c-a5613ffc3e61",
+      "name": "Summary format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1780,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Summarise new papers",
+        "height": 500,
+        "width": 820,
+        "color": 7
+      },
+      "id": "6957e31a-6d8e-58a2-8be8-42643d70e7fb",
+      "name": "Section: Summarise new papers",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('Set digest settings').first().json;\nconst papers = $('Keep the newest papers').all().map(i => i.json);\nconst esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst rows = $input.all().map((it, i) => ({ ...papers[i], ...(it.json.output || {}) }))\n  .filter(r => Number(r.relevance) >= (Number(s.min_relevance) || 6)).sort((a, b) => b.relevance - a.relevance);\nif (!rows.length) return [];\nconst html = `<div style=\"font-family:Arial,sans-serif;max-width:700px\"><h2>📚 ${rows.length} papers worth reading this week</h2>` +\n  rows.map(r => `<p><a href=\"${esc(r.url)}\"><b>${esc(r.title)}</b></a> <span style=\"color:#64748b\">(${r.relevance}/10 · ${esc(r.published)} · ${esc(r.topic)})</span><br>` +\n  `${esc(r.tldr)}<br><i style=\"color:#475569\">${esc(r.why)}</i></p>`).join('') +\n  '<p style=\"color:#94a3b8;font-size:11px\">AI summaries of abstracts. Check the paper before citing it.</p></div>';\nreturn [{ json: { subject: `Research digest: ${rows.length} papers for you`, html } }];"
+      },
+      "id": "76f136f1-4f3e-50c1-a7ad-49a19d21015f",
+      "name": "Build the digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2060,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Set digest settings').first().json.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "3ef14777-71f9-5b01-8714-c8a6680d25d5",
+      "name": "Send the digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2300,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. E-mail the digest",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "2342374e-1943-55a7-b288-c85a0a816d49",
+      "name": "Section: E-mail the digest",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c52a662b-ae9c-5779-96ca-5565b91a7a15",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "8f3ae898-f0cc-5758-9488-74e09f9c70e1",
+      "position": [
+        140,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "1738d2eb-e6c5-597a-b090-6f6fe5aa4401",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        680
+      ]
+    }
+  ],
+  "connections": {
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "TL;DR and relevance",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "TL;DR and relevance",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Monday at 7am": {
+      "main": [
+        [
+          {
+            "node": "Set digest settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set digest settings": {
+      "main": [
+        [
+          {
+            "node": "One item per topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per topic": {
+      "main": [
+        [
+          {
+            "node": "Search arXiv",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search arXiv": {
+      "main": [
+        [
+          {
+            "node": "Read the papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the papers": {
+      "main": [
+        [
+          {
+            "node": "Skip papers already sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip papers already sent": {
+      "main": [
+        [
+          {
+            "node": "Keep the newest papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep the newest papers": {
+      "main": [
+        [
+          {
+            "node": "TL;DR and relevance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TL;DR and relevance": {
+      "main": [
+        [
+          {
+            "node": "Build the digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build the digest": {
+      "main": [
+        [
+          {
+            "node": "Send the digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
