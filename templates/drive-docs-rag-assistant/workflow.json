@@ -1,0 +1,592 @@
+{
+  "name": "Chat with your Google Drive documents using Gemini and a free in-memory vector store",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Chat with your Google Drive documents using Gemini and a free in-memory vector store\n\nAsk questions about the PDFs, Google Docs and text files in one Google Drive folder and get answers that name the files they came from. No Pinecone, Supabase or other paid vector database: documents are embedded with Gemini's free embedding model and kept in n8n's built-in in-memory vector store.\n\n### How it works\n1. **Index my documents** (click to run, plus a daily schedule) lists the folder, keeps supported files and downloads them (Google Docs are exported as text).\n2. **Store in the in-memory vector store** splits each file into chunks, embeds them with Gemini and stores them with the file name and link.\n3. **When a chat message is received** opens n8n's hosted chat. **Answer from the documents** (AI Agent + Gemini) searches the store and answers only from what it finds, naming the source files.\n\n### Setup\n1. Add **Google Drive OAuth2** and **Google Gemini (PaLM) API** credentials (free key at aistudio.google.com).\n2. Put your folder ID (the last part of the folder URL) in **Set index settings**.\n3. Run **Index my documents** once, then activate the workflow and open the chat URL from the chat trigger.\n\n### Good to know\nThe in-memory store is cleared when n8n restarts; the daily schedule rebuilds it. For a persistent index, Telegram access, cited passages and an unanswered-questions digest, see the Pro version.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1040,
+        "width": 600
+      },
+      "id": "1d6c2318-f4f2-50be-a1d1-b2169b2014b6",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ae38b73c-7e79-5cfa-8c1f-61bc953e695f",
+      "name": "Index my documents",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "b31e8ecd-b139-5c6b-b165-e995607f8eac",
+      "name": "Every day at 6am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5a088381-1714-5cdc-98e2-a60c0305daaf",
+              "name": "drive_folder_id",
+              "value": "YOUR_DRIVE_FOLDER_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bbfceff9-4f9d-5181-ac06-e66d2a89cc4d",
+      "name": "Set index settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(\"'\" + $json.drive_folder_id + \"' in parents and trashed = false\") + '&fields=files(id,name,mimeType,modifiedTime,webViewLink,size)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "6e3ea719-6189-56fa-9d5a-9d5426749fb4",
+      "name": "List files in the folder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        380,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Supported: PDF, Google Docs / Slides / Sheets (exported as text or CSV), plain text, Markdown, CSV.\nconst EXPORT = { 'application/vnd.google-apps.document': 'text/plain', 'application/vnd.google-apps.presentation': 'text/plain',\n  'application/vnd.google-apps.spreadsheet': 'text/csv' };\nconst TEXT = ['text/plain', 'text/markdown', 'text/csv', 'text/x-markdown', 'application/pdf'];\nfunction plan(f) {\n  const base = 'https://www.googleapis.com/drive/v3/files/' + f.id;\n  if (EXPORT[f.mimeType]) return { ...f, kind: 'text', download_url: base + '/export?mimeType=' + encodeURIComponent(EXPORT[f.mimeType]) };\n  if (TEXT.includes(f.mimeType) || /\\.(md|txt|csv)$/i.test(f.name)) return { ...f, kind: f.mimeType === 'application/pdf' ? 'pdf' : 'text', download_url: base + '?alt=media&supportsAllDrives=true' };\n  return null;\n}\n\nreturn ($json.files || []).map(plan).filter(Boolean).map(f => ({ json: { file_id: f.id, name: f.name, mimeType: f.mimeType,\n  link: f.webViewLink || ('https://drive.google.com/file/d/' + f.id + '/view'), download_url: f.download_url } }));"
+      },
+      "id": "f2f6d9fc-9b3d-5912-88a9-a0f65f371619",
+      "name": "Keep supported files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.download_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "bf5c8588-3de6-5cc3-a5a0-8e66f884ddf8",
+      "name": "Download the file",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        860,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "memoryKey": {
+          "__rl": true,
+          "mode": "id",
+          "value": "drive_docs"
+        },
+        "clearStore": true,
+        "embeddingBatchSize": 100
+      },
+      "id": "fb3a3dc5-b4f7-5731-b861-9cdc812677c4",
+      "name": "Store in the in-memory vector store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-embedding-001"
+      },
+      "id": "da454e0b-224e-5b3d-82df-5a2ca2d11825",
+      "name": "Gemini embeddings (index)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "binary",
+        "textSplittingMode": "custom",
+        "options": {
+          "splitPages": false,
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "file_name",
+                "value": "={{ $('Keep supported files').item.json.name }}"
+              },
+              {
+                "name": "link",
+                "value": "={{ $('Keep supported files').item.json.link }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "c44c829f-8d78-5d16-9ed9-683960d15f9f",
+      "name": "Load the file text",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1180,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1200,
+        "chunkOverlap": 200,
+        "options": {}
+      },
+      "id": "de373681-33e6-5413-a2a3-7993437e1fbd",
+      "name": "Split into chunks",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Index the Drive folder",
+        "height": 800,
+        "width": 1500,
+        "color": 7
+      },
+      "id": "e36a92de-120a-542e-9163-10a7ecef5c1a",
+      "name": "Section: Index the Drive folder",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "initialMessages": "Hi! Ask me anything about the documents in our shared Drive folder.",
+        "options": {
+          "title": "Team docs assistant",
+          "subtitle": "Answers from your Google Drive folder",
+          "responseMode": "lastNode",
+          "loadPreviousSession": "notSupported"
+        }
+      },
+      "id": "3e8ab963-f40a-55a3-ae1f-adb60a3d7438",
+      "name": "When a chat message is received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        1480,
+        0
+      ],
+      "webhookId": "67b12d31-2101-5bd5-9a24-ecd69f3281d3"
+    },
+    {
+      "parameters": {
+        "promptType": "auto",
+        "options": {
+          "systemMessage": "You answer questions for a team using ONLY the passages returned by the document search tool. Always search first (you may search twice with different words). After each fact, name the source file in brackets, e.g. (Staff handbook.pdf). If the documents do not contain the answer, say you couldn't find it in the documents; never guess or use outside knowledge. Keep answers short and in the language of the question.",
+          "maxIterations": 5
+        }
+      },
+      "id": "3a929788-301e-5721-8096-169bab787cfc",
+      "name": "Answer from the documents",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "94102a9f-f45b-5241-96e6-8c3e9629344f",
+      "name": "Gemini chat model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 6
+      },
+      "id": "ffbf4c59-4124-5cff-9bd6-ad2afd1d86c4",
+      "name": "Chat memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1820,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Semantic search over the team's Google Drive documents. Input: a short search query. Returns passages with file_name and link metadata.",
+        "memoryKey": {
+          "__rl": true,
+          "mode": "id",
+          "value": "drive_docs"
+        },
+        "topK": 5,
+        "includeDocumentMetadata": true
+      },
+      "id": "073678d7-5ff0-5d03-bda9-9e8ce3e1c254",
+      "name": "Search the documents",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        1960,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-embedding-001"
+      },
+      "id": "b4d95404-f489-5c3e-91f4-d13c0bb8a5ca",
+      "name": "Gemini embeddings (search)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1960,
+        420
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 2. Answer questions in chat",
+        "height": 720,
+        "width": 700,
+        "color": 7
+      },
+      "id": "4cf44672-0ffd-51d1-bfb2-b8c0389c3bf1",
+      "name": "Section: Answer questions in chat",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a477d3ed-eb18-51a3-8d07-2d96f8421cca",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "bcf1002a-5126-5a48-b065-21c7ba5105bc",
+      "position": [
+        140,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "7434dfb3-1cf3-5ec4-ad57-c24a08cb46f4",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        680
+      ]
+    }
+  ],
+  "connections": {
+    "Index my documents": {
+      "main": [
+        [
+          {
+            "node": "Set index settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every day at 6am": {
+      "main": [
+        [
+          {
+            "node": "Set index settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set index settings": {
+      "main": [
+        [
+          {
+            "node": "List files in the folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List files in the folder": {
+      "main": [
+        [
+          {
+            "node": "Keep supported files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep supported files": {
+      "main": [
+        [
+          {
+            "node": "Download the file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download the file": {
+      "main": [
+        [
+          {
+            "node": "Store in the in-memory vector store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini embeddings (index)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Store in the in-memory vector store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load the file text": {
+      "ai_document": [
+        [
+          {
+            "node": "Store in the in-memory vector store",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into chunks": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Load the file text",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When a chat message is received": {
+      "main": [
+        [
+          {
+            "node": "Answer from the documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini chat model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Answer from the documents",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Answer from the documents",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search the documents": {
+      "ai_tool": [
+        [
+          {
+            "node": "Answer from the documents",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini embeddings (search)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Search the documents",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
