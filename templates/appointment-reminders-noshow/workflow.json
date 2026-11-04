@@ -1,0 +1,614 @@
+{
+  "name": "Send appointment reminders from Google Calendar by email 24 hours and 2 hours before, with a Sheets log",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Send appointment reminders from Google Calendar by email 24 hours and 2 hours before, with a Sheets log\n\nFewer no-shows for salons, clinics, tutors and coaches, using the Google Calendar you already book into. Every appointment with a client e-mail gets a friendly reminder 24 hours and 2 hours before (you choose the hours), sent once, from your own Gmail. Each evening you get tomorrow's list, with anyone missing an e-mail address highlighted.\n\n### How it works\n1. **Every 15 minutes** reads the next day of events from your bookings calendar.\n2. The client comes from `Email:`/`Name:`/`Service:` lines in the event description, or from the first guest.\n3. **Pick reminders due** finds the tightest reminder window that has opened and skips anything already sent (the `Reminders` tab is the memory). Moved appointments get fresh reminders.\n4. Reminders go out by Gmail and are logged.\n5. **Every evening at 6pm** you get tomorrow's appointments.\n\n### Setup\n1. Connect **Google Calendar**, **Gmail** and **Google Sheets**.\n2. Create a sheet with a `Reminders` tab (columns in the README).\n3. Fill in **Set reminder settings** and **Set agenda settings** (calendar ID, sheet ID, business name, timezone, hours).\n4. Add `Email: client@example.com` to your booking descriptions (or invite the client), then activate.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "dc44971c-6289-5a30-a4b1-00e2c61faccf",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "a20c8f8d-ffe9-57fb-bca7-8414342266c6",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dae49837-07df-55e4-8cdb-fb9b95fef39f",
+              "name": "calendar_id",
+              "value": "primary",
+              "type": "string"
+            },
+            {
+              "id": "d0187df8-f089-5abc-8cea-cf752413ae9c",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            },
+            {
+              "id": "0a3b6894-a5d8-58e7-8f5c-767367d92f97",
+              "name": "business_name",
+              "value": "YOUR_BUSINESS_NAME",
+              "type": "string"
+            },
+            {
+              "id": "07d8229a-90d0-5c44-bae1-1ac49a93ba69",
+              "name": "business_address",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "3d36e278-a4b4-5b06-8e3c-24281101cfde",
+              "name": "timezone",
+              "value": "Europe/London",
+              "type": "string"
+            },
+            {
+              "id": "84a90027-d64d-52f0-ac39-e710840303d5",
+              "name": "reminder_hours",
+              "value": "24,2",
+              "type": "string"
+            },
+            {
+              "id": "7044a4ff-2fe7-5db2-a754-582ddf4c5825",
+              "name": "booking_page_url",
+              "value": "https://YOUR_BOOKING_PAGE",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "91f0bf01-2a3f-5646-ac6d-8e6032a66917",
+      "name": "Set reminder settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set reminder settings').first().json.calendar_id }}"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.toISO() }}",
+        "timeMax": "={{ $now.plus({ hours: Math.max(...String($('Set reminder settings').first().json.reminder_hours || '24').split(',').map(Number)) + 1 }).toISO() }}",
+        "options": {
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "id": "cbb7665e-5c21-5dd0-9e29-99ba49d7388b",
+      "name": "Get upcoming appointments",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        380,
+        0
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "name": "Google Calendar account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set reminder settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Reminders"
+        },
+        "options": {}
+      },
+      "id": "339159bf-3fea-5da1-99f2-01ec99e836c3",
+      "name": "Read reminder log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        620,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\n// Client details from the calendar event: \"Email: / Name: / Service: / Telegram:\" lines in the description, else the first guest\nconst parseEvent = e => {\n  const desc = String(e.description || '').replace(/<br\\s*\\/?>/gi, '\\n').replace(/<[^>]+>/g, '');\n  const pick = re => ((desc.match(re) || [])[1] || '').trim();\n  const guest = (e.attendees || []).find(a => a.email && !a.self && !a.organizer && !a.resource) || {};\n  const title = String(e.summary || 'Appointment');\n  return { id: String(e.id), start: DateTime.fromISO(e.start?.dateTime || ''), end: DateTime.fromISO(e.end?.dateTime || ''),\n    email: (pick(/(?:^|\\n)\\s*e-?mail\\s*[:=]\\s*([^\\s<>]+@[^\\s<>]+)/i) || guest.email || '').toLowerCase(),\n    name: pick(/(?:^|\\n)\\s*(?:name|client)\\s*[:=]\\s*([^\\n]+)/i) || guest.displayName || title.split(/\\s[-–:|]\\s/)[0].trim(),\n    service: pick(/(?:^|\\n)\\s*service\\s*[:=]\\s*([^\\n]+)/i) || title.split(/\\s[-–:|]\\s/).slice(1).join(' ').trim() || title,\n    telegram: pick(/(?:^|\\n)\\s*telegram\\s*[:=]\\s*(-?\\d+)/i), title, cancelled: e.status === 'cancelled' || /^CANCELLED/i.test(title) };\n};\n\n// Which appointments need a reminder now? The tightest reminder window that has opened, once each.\nconst S = $('Set reminder settings').first().json;\nconst tz = S.timezone || 'Europe/London';\nconst offsets = String(S.reminder_hours || '24,2').split(',').map(Number).filter(n => n > 0);\nconst log = {};\nfor (const r of $('Read reminder log').all().map(i => i.json)) if (r.appointment_id) log[String(r.appointment_id)] = r;\nconst now = DateTime.now();\nconst out = [];\nfor (const e of $('Get upcoming appointments').all().map(i => i.json)) {\n  if (!e.id || !e.start?.dateTime) continue;\n  const a = parseEvent(e);\n  if (a.cancelled || !a.email || !a.start.isValid) continue;\n  const left = a.start.diff(now, 'hours').hours;\n  if (left <= 0) continue;\n  const row = log[a.id] || {};\n  const moved = row.start && DateTime.fromISO(String(row.start)).toMillis() !== a.start.toMillis();\n  const sent = moved ? [] : String(row.reminders_sent || '').split(',').map(s => s.trim()).filter(Boolean);\n  const due = offsets.filter(o => left <= o);\n  if (!due.length) continue;\n  const o = Math.min(...due);\n  if (sent.includes(String(o))) continue;\n  const when = a.start.setZone(tz).toFormat(\"cccc d LLLL 'at' HH:mm\");\n  const html = `<p>Hi ${esc(a.name.split(' ')[0] || 'there')},</p><p>A reminder of your <b>${esc(a.service)}</b> with ${esc(S.business_name)} on <b>${when}</b>${S.business_address ? ` at ${esc(S.business_address)}` : ''}.</p>\n<p>Can't make it? Please reply to this e-mail${S.booking_page_url && !String(S.booking_page_url).includes('YOUR_') ? ` or <a href=\"${S.booking_page_url}\">pick a new time</a>` : ''} so someone else can have the slot.</p><p>See you soon,<br>${esc(S.business_name)}</p>`;\n  out.push({ json: { to: a.email, subject: `Reminder: your ${a.service} on ${when}`, html,\n    row: { appointment_id: a.id, start: a.start.toISO(), client_name: a.name, client_email: a.email, service: a.service,\n      reminders_sent: [...sent, String(o)].join(','), last_reminder: now.toFormat('yyyy-MM-dd HH:mm') } } });\n}\nreturn out;"
+      },
+      "id": "7cc0f027-d0d0-5800-ac96-9db71ef35b4f",
+      "name": "Pick reminders due",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Find appointments that need a reminder",
+        "height": 300,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "81bd1cda-8ead-5b63-8745-ffda5b1abc52",
+      "name": "Section: Find appointments that need a reminder",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "7e8e1bc9-afef-5762-b627-776391ec2e82",
+      "name": "Send reminder e-mail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1160,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return { json: $('Pick reminders due').item.json.row };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "f1d19628-03de-5914-8ad2-4abd67a7f2b2",
+      "name": "Prepare log row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set reminder settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Reminders"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "appointment_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "5ece52a4-874e-5095-9130-3bb7e4c3d815",
+      "name": "Log the reminder",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1640,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 2. Send and log",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "4a62fbbb-6525-531c-9f05-9060576664bf",
+      "name": "Section: Send and log",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      },
+      "id": "d3ad341d-5989-5828-af86-2ef8af0b4a09",
+      "name": "Every evening at 6pm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "dae49837-07df-55e4-8cdb-fb9b95fef39f",
+              "name": "calendar_id",
+              "value": "primary",
+              "type": "string"
+            },
+            {
+              "id": "4fe6184e-5cfb-5f50-b50e-8c0a98ca758e",
+              "name": "owner_email",
+              "value": "YOUR_EMAIL@example.com",
+              "type": "string"
+            },
+            {
+              "id": "3d36e278-a4b4-5b06-8e3c-24281101cfde",
+              "name": "timezone",
+              "value": "Europe/London",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7f1ce06d-214c-5bd8-bd87-f584c1e6f8e1",
+      "name": "Set agenda settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.calendar_id }}"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.plus({ days: 1 }).startOf('day').toISO() }}",
+        "timeMax": "={{ $now.plus({ days: 1 }).endOf('day').toISO() }}",
+        "options": {
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "id": "5241234a-da7e-5ccf-8d9d-36c14b12afd2",
+      "name": "Get tomorrow's appointments",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        380,
+        1000
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "name": "Google Calendar account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\n// Client details from the calendar event: \"Email: / Name: / Service: / Telegram:\" lines in the description, else the first guest\nconst parseEvent = e => {\n  const desc = String(e.description || '').replace(/<br\\s*\\/?>/gi, '\\n').replace(/<[^>]+>/g, '');\n  const pick = re => ((desc.match(re) || [])[1] || '').trim();\n  const guest = (e.attendees || []).find(a => a.email && !a.self && !a.organizer && !a.resource) || {};\n  const title = String(e.summary || 'Appointment');\n  return { id: String(e.id), start: DateTime.fromISO(e.start?.dateTime || ''), end: DateTime.fromISO(e.end?.dateTime || ''),\n    email: (pick(/(?:^|\\n)\\s*e-?mail\\s*[:=]\\s*([^\\s<>]+@[^\\s<>]+)/i) || guest.email || '').toLowerCase(),\n    name: pick(/(?:^|\\n)\\s*(?:name|client)\\s*[:=]\\s*([^\\n]+)/i) || guest.displayName || title.split(/\\s[-–:|]\\s/)[0].trim(),\n    service: pick(/(?:^|\\n)\\s*service\\s*[:=]\\s*([^\\n]+)/i) || title.split(/\\s[-–:|]\\s/).slice(1).join(' ').trim() || title,\n    telegram: pick(/(?:^|\\n)\\s*telegram\\s*[:=]\\s*(-?\\d+)/i), title, cancelled: e.status === 'cancelled' || /^CANCELLED/i.test(title) };\n};\n\n// Tomorrow's appointments for the owner, with anyone missing an e-mail address (they get no reminder)\nconst S = $('Set agenda settings').first().json;\nconst tz = S.timezone || 'Europe/London';\nconst list = $(\"Get tomorrow's appointments\").all().map(i => i.json).filter(e => e.id && e.start?.dateTime).map(parseEvent).filter(a => !a.cancelled);\nconst day = DateTime.now().setZone(tz).plus({ days: 1 }).toFormat('cccc d LLLL');\nconst li = list.map(a => `<li><b>${a.start.setZone(tz).toFormat('HH:mm')}</b> ${esc(a.name)}: ${esc(a.service)}${a.email ? '' : ' <span style=\"color:#b42318\">(no e-mail, no reminder)</span>'}</li>`).join('');\nreturn [{ json: { subject: `Tomorrow (${day}): ${list.length} appointment(s)`, html: list.length ? `<ul>${li}</ul>` : '<p>Nothing booked for tomorrow.</p>' } }];"
+      },
+      "id": "3fd07b83-b588-5bef-a796-831f38975012",
+      "name": "Build tomorrow's list",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Set agenda settings').first().json.owner_email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "6c70df2d-7fd0-5e74-8c21-4a030044363a",
+      "name": "Email tomorrow's list",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        1000
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Tomorrow's list for you",
+        "height": 300,
+        "width": 1180,
+        "color": 7
+      },
+      "id": "0de149ac-02ac-5bcf-bfd8-bfd408cd6f22",
+      "name": "Section: Tomorrow's list for you",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        880
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d31c9ed8-e468-5ced-9bf8-aa38d4412167",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "html",
+        "message": "=<p><b>{{ $json.workflow.name }}</b> failed.</p><p>Node: {{ $json.execution.lastNodeExecuted }}<br>Error: {{ $json.execution.error.message }}</p><p>{{ $json.execution.url }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "6d4e3e49-88df-503b-b74d-5ee5a79f1f18",
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        140,
+        2000
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nPut your e-mail in **Email the error**, then pick this workflow under **Workflow settings > Error workflow**.",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "c2c335fa-bd5e-5a39-a68e-9550f9b2e649",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        1880
+      ]
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Set reminder settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set reminder settings": {
+      "main": [
+        [
+          {
+            "node": "Get upcoming appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get upcoming appointments": {
+      "main": [
+        [
+          {
+            "node": "Read reminder log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read reminder log": {
+      "main": [
+        [
+          {
+            "node": "Pick reminders due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick reminders due": {
+      "main": [
+        [
+          {
+            "node": "Send reminder e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send reminder e-mail": {
+      "main": [
+        [
+          {
+            "node": "Prepare log row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare log row": {
+      "main": [
+        [
+          {
+            "node": "Log the reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every evening at 6pm": {
+      "main": [
+        [
+          {
+            "node": "Set agenda settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set agenda settings": {
+      "main": [
+        [
+          {
+            "node": "Get tomorrow's appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get tomorrow's appointments": {
+      "main": [
+        [
+          {
+            "node": "Build tomorrow's list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build tomorrow's list": {
+      "main": [
+        [
+          {
+            "node": "Email tomorrow's list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
