@@ -4,7 +4,9 @@
 
 After twenty applications nobody remembers who replied. This template watches your Gmail every hour, lets Google Gemini decide whether each email is about one of your own job applications, and extracts the company, role, status (applied, assessment, interview, offer, rejected, recruiter outreach), next step and any deadline.
 
-Each application is upserted by company + role, so the confirmation, the interview invite and the eventual offer all update the same row instead of piling up. Job alerts, newsletters and marketing mail are ignored. It uses only Gmail, Google Sheets and Gemini's free tier.
+Each application is upserted by company + role, so the confirmation, the interview invite and the eventual offer all update the same row instead of piling up. Job alerts, newsletters and marketing mail are ignored.
+
+Every Monday at 8am you also get a follow-up summary e-mail: deadlines in the next 7 days, applications that have had no news for 7+ days (with a link to each Gmail thread so you can chase them in one click), this week's replies and your response rate. It uses only Gmail, Google Sheets and Gemini's free tier.
 
 ## Who it's for
 - Job seekers sending lots of applications
@@ -17,13 +19,15 @@ Each application is upserted by company + role, so the confirmation, the intervi
 3. **Detect company, role and status** (Basic LLM Chain + Gemini + Structured Output Parser) returns `is_job_application`, company, role, status, next step, deadline and confidence.
 4. **Keep job application emails** drops everything else.
 5. **Prepare application row** builds a stable key from company + role and a Gmail link; **Update application in Google Sheets** appends or updates the row.
+6. **Every Monday at 8am** → **Read all applications** → **Build follow-up summary** (Code: deadlines in the next 7 days, applications in applied / recruiter outreach / assessment with no update for `follow_up_after_days`, this week's replies, funnel counts) → **Email the follow-up summary** (Gmail, HTML with thread links).
 
 ## Setup
 1. Add a **Gmail OAuth2** credential to the trigger and a free **Google Gemini (PaLM) API** credential to the chat model.
 2. Create a Google Sheet with an `Applications` tab and this header row:
    `application_key | company | role | status | next_step | deadline | last_update | last_subject | from | gmail_link`
-3. Put the Sheet ID in **Config** and connect **Google Sheets OAuth2**.
-4. Activate. The trigger only picks up emails that arrive after activation.
+3. Put the Sheet ID in **Config** and **Set summary settings** and connect **Google Sheets OAuth2**.
+4. Put your e-mail address and `follow_up_after_days` (default 7) in **Set summary settings**.
+5. Activate. The trigger only picks up emails that arrive after activation.
 
 ## Requirements
 - n8n 2.x (built and import-tested on n8n 2.43.7). Cloud or self-hosted; built-in nodes only, no community nodes.
@@ -33,6 +37,7 @@ Each application is upserted by company + role, so the confirmation, the intervi
 
 ## Customisation ideas
 - Edit the trigger's search to add your own keywords or a Gmail label.
+- Change which statuses count as waiting, or the 7-day deadline window, in **Build follow-up summary**.
 - Add statuses such as `withdrawn` or `ghosted` to the prompt.
 - Add conditional formatting on `status` for a colour-coded board.
 
