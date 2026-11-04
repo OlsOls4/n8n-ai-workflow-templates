@@ -1,0 +1,887 @@
+{
+  "name": "Cluster Google Autocomplete keywords by search intent with Gemini into a Google Sheets content calendar",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Cluster Google Autocomplete keywords by search intent with Gemini into a Google Sheets content calendar\n\nTurn a few seed keywords into a keyword map and a month of content without paying for an SEO tool. The workflow expands each seed through Google Autocomplete (questions plus a-z), cleans and counts the suggestions, and has Gemini group them into topic clusters by search intent. Each cluster gets a pillar keyword, a content type, a priority and a working title. Keywords and a 4-week content calendar land in Google Sheets.\n\n### How it works\n1. **Keyword seeds form**: up to 10 seeds, country and language.\n2. **Plan autocomplete queries** builds question and alphabet variations (capped by `max_queries`).\n3. **Get Google Autocomplete suggestions** calls the public suggest endpoint once every 1.2 seconds.\n4. **Clean and count keywords** dedupes, drops drift and counts how often each keyword appeared.\n5. **Cluster keywords by intent** (Gemini) returns clusters by keyword id, and **Validate clusters** removes invented ids.\n6. Keywords and the calendar are written to Sheets and shown on the result page.\n\n### Setup\n1. Add **Google Gemini (PaLM) API** and **Google Sheets** credentials.\n2. Create `Keywords` and `Calendar` tabs (columns in the README) and put the Sheet ID in **Set planner settings**.\n3. Describe your site and audience there, activate and open the form.\n\nAutocomplete is unofficial and gives no search volumes: treat it as topic and intent coverage.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "74e1cb3d-0b80-5604-ab77-b4fa732e0635",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Plan content from seed keywords",
+        "formDescription": "Google Autocomplete + Gemini: keyword clusters by intent and a 4-week content calendar.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Seed keywords (one per line, up to 10)",
+              "fieldName": "seeds",
+              "fieldType": "textarea",
+              "requiredField": true,
+              "placeholder": "meal prep\nbatch cooking"
+            },
+            {
+              "fieldLabel": "Country",
+              "fieldName": "gl",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "gb"
+                  },
+                  {
+                    "option": "us"
+                  },
+                  {
+                    "option": "ca"
+                  },
+                  {
+                    "option": "au"
+                  },
+                  {
+                    "option": "ie"
+                  },
+                  {
+                    "option": "in"
+                  },
+                  {
+                    "option": "nz"
+                  },
+                  {
+                    "option": "de"
+                  },
+                  {
+                    "option": "fr"
+                  },
+                  {
+                    "option": "es"
+                  },
+                  {
+                    "option": "nl"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Language",
+              "fieldName": "hl",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "en"
+                  },
+                  {
+                    "option": "de"
+                  },
+                  {
+                    "option": "fr"
+                  },
+                  {
+                    "option": "es"
+                  },
+                  {
+                    "option": "it"
+                  },
+                  {
+                    "option": "nl"
+                  },
+                  {
+                    "option": "pt"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Build my plan"
+        }
+      },
+      "id": "ca2d2ae5-9100-5de4-aa05-f317f30806db",
+      "name": "Keyword seeds form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "c6276c8c-7609-5620-8b63-5f41b089fccc"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9f8482c7-37d3-5905-befa-345c5f79a6fc",
+              "name": "default_project",
+              "value": "My site",
+              "type": "string"
+            },
+            {
+              "id": "d30f7d7d-df5a-5844-83d5-fa148732f8d2",
+              "name": "site_topic",
+              "value": "Practical guides for home cooks",
+              "type": "string"
+            },
+            {
+              "id": "551be114-951e-5da7-822c-287c7f317928",
+              "name": "audience",
+              "value": "Busy beginners who want simple, reliable advice",
+              "type": "string"
+            },
+            {
+              "id": "04d3057a-ea08-5838-8c38-f51de2631ecb",
+              "name": "language",
+              "value": "British English",
+              "type": "string"
+            },
+            {
+              "id": "b45e44f0-7dc6-57a3-adf3-b7b253dbe2f5",
+              "name": "default_hl",
+              "value": "en",
+              "type": "string"
+            },
+            {
+              "id": "daefe6ce-b8fd-5054-bc8f-bd772dd0f033",
+              "name": "default_gl",
+              "value": "gb",
+              "type": "string"
+            },
+            {
+              "id": "4c5d1562-fa85-584c-9773-de178896ab0b",
+              "name": "max_queries",
+              "value": 80,
+              "type": "number"
+            },
+            {
+              "id": "e3680835-a807-5ec5-ad39-0eccd5399831",
+              "name": "max_keywords",
+              "value": 150,
+              "type": "number"
+            },
+            {
+              "id": "1da0e591-27ef-5edf-8540-3e513e4d7b3a",
+              "name": "posts_per_week",
+              "value": 2,
+              "type": "number"
+            },
+            {
+              "id": "8b796d87-e19f-5532-b873-21f9acd4e0dc",
+              "name": "weeks",
+              "value": 4,
+              "type": "number"
+            },
+            {
+              "id": "249ad729-b2e6-52d0-ae2a-207406e9ad5c",
+              "name": "start_date",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "836a2037-b3ba-5e57-a962-5ae201fbc309",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {},
+        "includeOtherFields": true
+      },
+      "id": "b305f7f6-3fdb-50ac-b8a1-f342863c2e79",
+      "name": "Set planner settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Collect the seeds",
+        "height": 300,
+        "width": 460,
+        "color": 7
+      },
+      "id": "0c42213e-c459-5cb4-b8ff-5fadc3d9e120",
+      "name": "Section: Collect the seeds",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alphabet-soup + question expansion for each seed (Google Autocomplete is unofficial: few queries, one every ~1.2 s)\nconst s = $('Set planner settings').first().json;\nconst out = [];\nfor (const j of $input.all().map(i => i.json)) {\n  const seeds = String(j.seeds || '').split(/[\\n,;]+/).map(x => x.trim().toLowerCase()).filter(Boolean).slice(0, 10);\n  const max = Math.min(Number(j.max_queries || s.max_queries) || 80, 400);\n  const per = Math.max(6, Math.floor(max / Math.max(seeds.length, 1)));\n  for (const seed of seeds) {\n    const qs = [seed, ...['how', 'what', 'why', 'best', 'is', 'can', 'which', 'where', 'when'].map(p => `${p} ${seed}`),\n      `${seed} vs`, `${seed} for`, `${seed} cost`, `${seed} near me`, `${seed} without`, `${seed} or`,\n      ...'abcdefghijklmnopqrstuvwxyz'.split('').map(c => `${seed} ${c}`)];\n    for (const q of qs.slice(0, per)) out.push({ json: { project: j.project || s.default_project, seed, q, hl: j.hl || s.default_hl, gl: j.gl || s.default_gl } });\n  }\n}\nreturn out;"
+      },
+      "id": "c46466b6-9aaa-5593-a68f-c05fcd7f62be",
+      "name": "Plan autocomplete queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://suggestqueries.google.com/complete/search",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1200
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "client",
+              "value": "firefox"
+            },
+            {
+              "name": "q",
+              "value": "={{ $json.q }}"
+            },
+            {
+              "name": "hl",
+              "value": "={{ $json.hl }}"
+            },
+            {
+              "name": "gl",
+              "value": "={{ $json.gl }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n keyword planner)"
+            }
+          ]
+        }
+      },
+      "id": "bbe67dc4-1dd8-5ab2-9e95-ec03175190a3",
+      "name": "Get Google Autocomplete suggestions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        680,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse suggestions, normalise, dedupe, and count how many queries surfaced each keyword.\n// \"hits\" is a rough popularity signal, NOT search volume (Autocomplete gives no volumes).\nconst reqs = $('Plan autocomplete queries').all();\nconst STOP = new Set(['the', 'a', 'an', 'for', 'to', 'of', 'in', 'on', 'and', 'or', 'is', 'vs', 'with', 'near', 'me', 'my', 'how', 'what', 'why', 'best', 'can', 'which', 'where', 'when']);\nconst hint = k => /\\b(buy|price|prices|cost|costs|cheap|deal|discount|coupon|hire|book|order|near me|for sale|quote|subscription)\\b/.test(k) ? 'transactional'\n  : /\\b(best|top|vs|versus|review|reviews|compare|comparison|alternative|alternatives)\\b/.test(k) ? 'commercial'\n  : /^(how|what|why|when|where|which|who|is|can|does|do|should|are)\\b/.test(k) ? 'informational' : 'mixed';\nconst prev = new Set();\nconst P = {};\n// read the HTTP results by node name: in Pro, \"Read previous keywords\" sits between the HTTP node and this one\n$('Get Google Autocomplete suggestions').all().forEach((item, i) => {\n  const r = reqs[i].json;\n  const p = P[r.project] = P[r.project] || { project: r.project, seeds: new Set(), kw: {}, queries: 0, failed: 0 };\n  p.seeds.add(r.seed); p.queries++;\n  if (/automated queries|unusual traffic|<title>Sorry/i.test(String(item.json.data || ''))) p.blocked = (p.blocked || 0) + 1;\n  let arr = null;\n  try { const d = typeof item.json.data === 'string' ? JSON.parse(item.json.data) : item.json; arr = Array.isArray(d) ? d[1] : d['1']; } catch (e) {}\n  if (!Array.isArray(arr)) { p.failed++; return; }\n  const sig = r.seed.split(' ').filter(w => w.length > 2 && !STOP.has(w));\n  for (let k of [r.seed, ...arr]) {\n    k = String(k).toLowerCase().replace(/\\s+/g, ' ').trim();\n    if (!k || k.length > 90 || (sig.length && !sig.some(w => k.includes(w.replace(/s$/, ''))))) continue;  // drifted suggestion\n    const e = p.kw[k] = p.kw[k] || { keyword: k, seed: r.seed, hits: 0 };\n    e.hits++;\n  }\n});\nconst s = $('Set planner settings').first().json;\nconst today = $now.toFormat('yyyy-MM-dd');\nreturn Object.values(P).map(p => {\n  const keywords = Object.values(p.kw).sort((a, b) => b.hits - a.hits || a.keyword.length - b.keyword.length)\n    .slice(0, Number(s.max_keywords) || 200)\n    .map((k, i) => ({ id: i + 1, ...k, keyword_key: `${p.project}|${k.keyword}`, intent_hint: hint(k.keyword),\n      is_question: /^(how|what|why|when|where|which|who|is|can|does|do|should|are)\\b/.test(k.keyword), words: k.keyword.split(' ').length,\n      is_new: prev.size ? !prev.has(`${p.project}|${k.keyword}`) : false, last_seen: today }));\n  return { json: { project: p.project, seeds: [...p.seeds].join(', '), queries: p.queries, failed_queries: p.failed, blocked_queries: p.blocked || 0,\n    keyword_count: keywords.length, new_count: keywords.filter(k => k.is_new).length, keywords,\n    keyword_list: keywords.map(k => `${k.id}. ${k.keyword} [${k.hits}]`).join('\\n') } };\n});"
+      },
+      "id": "61e135b6-28b5-5ac1-8866-2afa225de58b",
+      "name": "Clean and count keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Expand the seeds with Google Autocomplete",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "49b86bcf-774c-5529-b1e9-afae7b9bec02",
+      "name": "Section: Expand the seeds with Google Autocomplete",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a756fd42-5732-5f08-b4bc-dfc7c3ddd843",
+              "leftValue": "={{ $json.keyword_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "02b1568b-b81c-5ad4-8bc9-5d0e9e0cf0e6",
+      "name": "Found any keywords?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nothing to cluster: say why instead of calling Gemini with an empty list (nothing is written to the sheet)\nconst j = $json;\nconst why = j.blocked_queries ? `Google answered ${j.blocked_queries} of ${j.queries} Autocomplete calls with its \"unusual traffic\" page, so this server's IP is being rate-limited.`\n  : j.failed_queries ? `${j.failed_queries} of ${j.queries} Google Autocomplete calls failed.` : `Google Autocomplete returned no suggestions that match your seeds.`;\nconst fix = j.failed_queries ? 'Try again in an hour, lower max_queries in Set planner settings, or run the workflow from another n8n host.' : 'Try broader or shorter seed keywords.';\nconst msg = `No keywords found for ${j.project ? j.project + ' (' + j.seeds + ')' : j.seeds}. ${why} ${fix} Nothing was written to your Google Sheet.`;\nreturn [{ json: { ...j, message: msg, subject: `Keyword planner: no keywords for ${j.project || j.seeds}`, html: `<h2>No keywords found</h2><p>${msg}</p>` } }];"
+      },
+      "id": "962dd236-c1a5-58a7-896d-14e25d732822",
+      "name": "Explain why no keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {
+          "formTitle": "No keywords found"
+        }
+      },
+      "id": "14493350-2cb5-5630-81fa-51af4fcddccb",
+      "name": "Show no keywords found",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1460,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an SEO content strategist. Group these keywords into topic clusters by search intent.\n\nSeeds: {{ $json.seeds }}\nSite: {{ $('Set planner settings').first().json.site_topic }}\nAudience: {{ $('Set planner settings').first().json.audience }}\n\nKeywords (id. keyword [autocomplete hits, a rough popularity signal]):\n{{ $json.keyword_list }}\n\nRules:\n- A cluster is a set of keywords ONE page can rank for: same topic and same intent. Usually 3-15 keywords each; make as many clusters as the list needs.\n- Use only the ids above. Each id appears in at most one cluster. Put off-topic or junk ids in ignored_ids.\n- pillar_id: the broadest, most representative keyword in the cluster.\n- intent: informational, commercial, transactional or navigational. funnel: top, middle or bottom.\n- content_type: guide, how-to, listicle, comparison, review, landing page, category page, FAQ or tool.\n- priority 1-5 (5 = write first), weighing hits, buying intent and fit with the site.\n- title: a specific working title in {{ $('Set planner settings').first().json.language }}. No years or numbers you can't justify.",
+        "hasOutputParser": true
+      },
+      "id": "c916c150-fc21-5f42-b8e6-6e8de54048d0",
+      "name": "Cluster keywords by intent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1460,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.2,
+          "maxOutputTokens": 8192
+        }
+      },
+      "id": "abb7cc1b-f053-534c-a09a-c4e3037cc67d",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1460,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"clusters\": [\n    {\n      \"name\": \"Meal prep for beginners\",\n      \"pillar_id\": 1,\n      \"keyword_ids\": [\n        1,\n        4,\n        9\n      ],\n      \"intent\": \"informational\",\n      \"funnel\": \"top\",\n      \"content_type\": \"guide\",\n      \"priority\": 5,\n      \"title\": \"Meal Prep for Beginners: A Simple First Week\"\n    }\n  ],\n  \"ignored_ids\": [\n    40\n  ]\n}"
+      },
+      "id": "71e45fd3-0a76-560e-8836-765054e24a10",
+      "name": "Cluster format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1600,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map ids back to keywords, drop invented ids, keep each keyword in one cluster, rank clusters\nconst src = $('Clean and count keywords').all();\nreturn $input.all().map((item, i) => {\n  const P = src[i].json, o = item.json.output || {};\n  const byId = new Map(P.keywords.map(k => [k.id, k]));\n  const used = new Set(), clusters = [];\n  for (const c of (o.clusters || [])) {\n    const ids = [...new Set((c.keyword_ids || []).map(Number))].filter(id => byId.has(id) && !used.has(id));\n    if (!ids.length) continue;\n    ids.forEach(id => used.add(id));\n    let pillar = Number(c.pillar_id);\n    if (!ids.includes(pillar)) pillar = ids.slice().sort((a, b) => byId.get(b).hits - byId.get(a).hits || byId.get(a).keyword.length - byId.get(b).keyword.length)[0];\n    const members = ids.map(id => byId.get(id));\n    const hits = members.reduce((a, k) => a + k.hits, 0);\n    const intent = ['informational', 'commercial', 'transactional', 'navigational'].includes(c.intent) ? c.intent : 'informational';\n    const priority = Math.min(5, Math.max(1, Math.round(Number(c.priority) || 3)));\n    const gap = false, covered = false;\n    clusters.push({ cluster: String(c.name || byId.get(pillar).keyword).slice(0, 80), pillar_keyword: byId.get(pillar).keyword, intent,\n      funnel: c.funnel || '', content_type: c.content_type || '', priority, title: c.title || byId.get(pillar).keyword,\n      keywords: members.map(k => k.keyword), questions: members.filter(k => k.is_question).map(k => k.keyword),\n      keyword_count: members.length, total_hits: hits, gap, covered,\n      score: priority * 10 + Math.min(hits, 40) + (['commercial', 'transactional'].includes(intent) ? 5 : 0) + (gap ? 8 : 0) - (covered ? 15 : 0) });\n  }\n  clusters.sort((a, b) => b.score - a.score);\n  const ignored = new Set((o.ignored_ids || []).map(Number));\n  const of = {};\n  clusters.forEach(c => c.keywords.forEach(k => { of[k] = c; }));\n  const keywords = P.keywords.map(k => ({ ...k, cluster: of[k.keyword] ? of[k.keyword].cluster : ignored.has(k.id) ? '(off-topic)' : '(unclustered)',\n    intent: of[k.keyword] ? of[k.keyword].intent : k.intent_hint }));\n  return { json: { ...P, clusters, keywords, keyword_list: undefined, unclustered: keywords.filter(k => k.cluster === '(unclustered)').length, ignored: ignored.size } };\n});"
+      },
+      "id": "e7d38e3c-2233-5c8a-8b6e-249f7edc4a0e",
+      "name": "Validate clusters",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Cluster by intent with AI",
+        "height": 720,
+        "width": 780,
+        "color": 7
+      },
+      "id": "6f8bcddd-2712-5f0b-a5d5-31326fc65763",
+      "name": "Section: Cluster by intent with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One row per keyword for the Keywords tab (upserted by keyword_key, so re-runs update last_seen)\nconst out = [];\nfor (const P of $('Validate clusters').all().map(i => i.json))\n  for (const k of P.keywords) out.push({ json: { keyword_key: k.keyword_key, project: P.project, keyword: k.keyword, seed: k.seed,\n    hits: k.hits, words: k.words, is_question: k.is_question ? 'yes' : 'no', intent: k.intent, cluster: k.cluster, last_seen: k.last_seen } });\nreturn out;"
+      },
+      "id": "68e847a6-d3a7-5fc9-ad8c-22e0d5565d3c",
+      "name": "Prepare keyword rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set planner settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Keywords"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "keyword_key"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "b156d0bd-bfe7-5865-919d-07a296ba4e11",
+      "name": "Save keywords",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2320,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('Set planner settings').first().json;\nconst start = (() => { const d = s.start_date ? DateTime.fromISO(String(s.start_date)) : null;\n  if (d && d.isValid) return d; const t = $today; return t.plus({ days: ((8 - t.weekday) % 7) || 7 }); })();  // next Monday\nconst OFF = { 1: [0], 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4] };\nconst dateFor = (n, perWeek) => { const offs = OFF[Math.min(Math.max(perWeek, 1), 5)]; return start.plus({ weeks: Math.floor(n / offs.length), days: offs[n % offs.length] }).toFormat('yyyy-MM-dd'); };\n// Content calendar: the highest-ranked clusters, one article each, spread over the next weeks\nconst perWeek = Number(s.posts_per_week) || 2, weeks = Number(s.weeks) || 4;\nconst out = [];\nfor (const P of $('Validate clusters').all().map(i => i.json))\n  P.clusters.slice(0, perWeek * weeks).forEach((c, n) => out.push({ json: {\n    slot_key: `${P.project}|${c.pillar_keyword}`, project: P.project, publish_date: dateFor(n, perWeek), title: c.title,\n    primary_keyword: c.pillar_keyword, secondary_keywords: c.keywords.filter(k => k !== c.pillar_keyword).slice(0, 10).join(', '),\n    questions: c.questions.slice(0, 6).join(' | '), cluster: c.cluster, intent: c.intent, funnel: c.funnel, content_type: c.content_type,\n    priority: c.priority, status: 'planned' } }));\nreturn out;"
+      },
+      "id": "b9e52a8a-79a3-556e-9fa4-ffb24bd2a62e",
+      "name": "Build content calendar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2560,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set planner settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Calendar"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "slot_key"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "dd17e253-c72c-5fd7-ab75-e1455de071d9",
+      "name": "Save content calendar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2800,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// Results page\nconst P = $('Validate clusters').first().json;\nconst cal = $('Build content calendar').all().map(i => i.json);\nconst rows = P.clusters.slice(0, 12).map(c => `<tr><td><b>${esc(c.cluster)}</b><br><small>${esc(c.keywords.slice(0, 6).join(', '))}</small></td><td>${esc(c.intent)}</td><td>${c.keyword_count}</td><td>${c.priority}</td></tr>`).join('');\nconst plan = cal.map(c => `<li>${esc(c.publish_date)}: <b>${esc(c.title)}</b> (${esc(c.primary_keyword)})</li>`).join('');\nreturn [{ json: { html: `<p>${P.queries} Autocomplete queries${P.failed_queries ? ` (${P.failed_queries} failed)` : ''} &rarr; <b>${P.keyword_count}</b> keywords &rarr; <b>${P.clusters.length}</b> clusters. Saved to your Keywords and Calendar tabs.</p>\n<h3>Top clusters</h3><table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse;font-size:13px\"><tr><th>Cluster</th><th>Intent</th><th>Keywords</th><th>Priority</th></tr>${rows}</table>\n<h3>Content calendar</h3><ol>${plan}</ol>` } }];"
+      },
+      "id": "08b5185d-7569-58c9-8dcd-3adda253d5a9",
+      "name": "Build results page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {
+          "formTitle": "Your content plan"
+        }
+      },
+      "id": "42a3d1d1-e0be-5557-a58b-f2a402aa7165",
+      "name": "Show the plan",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        3280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. Save keywords and the calendar",
+        "height": 300,
+        "width": 1420,
+        "color": 7
+      },
+      "id": "e55ad25e-ce22-5fc8-b9f0-2b1d60b17ca8",
+      "name": "Section: Save keywords and the calendar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2020,
+        -120
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "823d82e2-1d7c-59d7-9444-71ce8c331462",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "42040849-0016-59e0-8cae-ae6b530b771d",
+      "position": [
+        140,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "17b90fe1-dc3e-5573-81aa-9879b6266aa6",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        660
+      ]
+    }
+  ],
+  "connections": {
+    "Keyword seeds form": {
+      "main": [
+        [
+          {
+            "node": "Set planner settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan autocomplete queries": {
+      "main": [
+        [
+          {
+            "node": "Get Google Autocomplete suggestions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Google Autocomplete suggestions": {
+      "main": [
+        [
+          {
+            "node": "Clean and count keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set planner settings": {
+      "main": [
+        [
+          {
+            "node": "Plan autocomplete queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean and count keywords": {
+      "main": [
+        [
+          {
+            "node": "Found any keywords?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found any keywords?": {
+      "main": [
+        [
+          {
+            "node": "Cluster keywords by intent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain why no keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explain why no keywords": {
+      "main": [
+        [
+          {
+            "node": "Show no keywords found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Cluster keywords by intent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cluster format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Cluster keywords by intent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cluster keywords by intent": {
+      "main": [
+        [
+          {
+            "node": "Validate clusters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate clusters": {
+      "main": [
+        [
+          {
+            "node": "Prepare keyword rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare keyword rows": {
+      "main": [
+        [
+          {
+            "node": "Save keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save keywords": {
+      "main": [
+        [
+          {
+            "node": "Build content calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build content calendar": {
+      "main": [
+        [
+          {
+            "node": "Save content calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save content calendar": {
+      "main": [
+        [
+          {
+            "node": "Build results page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build results page": {
+      "main": [
+        [
+          {
+            "node": "Show the plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
