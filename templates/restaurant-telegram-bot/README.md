@@ -4,7 +4,7 @@
 
 Give your restaurant or café a Telegram assistant that answers the questions staff hear all day: opening hours, parking, vegan options, what's in a dish, which allergens it contains. The bot answers only from a Google Sheet you control, so updating the menu or your hours is as easy as editing a cell.
 
-Allergen guardrails are built into the prompt: the bot repeats only the allergens you list, never calls a dish "safe", always asks customers to tell staff about allergies, and gives your phone number when it doesn't know. Booking requests get your booking details. Messages trying to make the bot go off-topic are ignored.
+Allergy questions are handled by a deterministic filter, not by AI guesswork: when a customer says "I'm coeliac", "nut allergy" or "anything vegan?", a Code node checks every dish against your `allergens` and `dietary` columns (the 14 UK/EU allergens plus vegan, vegetarian, halal and kosher) and removes the ones that don't fit before the AI ever sees the menu. Dishes with no allergen information are never offered as suitable. If nothing fits, the customer gets a fixed reply listing what fits each need and your phone number, with no AI involved, and every allergy answer ends with a fixed "please tell staff" line. The bot never calls a dish "safe" and gives your phone number when it doesn't know. Booking requests get your booking details. Messages trying to make the bot go off-topic are ignored.
 
 Telegram and Gemini's free tier cost nothing to run for a typical venue.
 
@@ -18,13 +18,15 @@ Telegram and Gemini's free tier cost nothing to run for a typical venue.
 2. **Set restaurant details** holds the name, phone number and booking info.
 3. **Read menu and FAQ sheet** reads the `Knowledge` tab on every message, so edits are live immediately.
 4. **Build knowledge base** (Code) turns rows into a compact menu (price, allergens, dietary tags) plus an information list.
-5. **Answer question with AI** (Basic LLM Chain + Gemini 3.5 Flash-Lite) answers in the customer's language, under 100 words.
-6. **Send answer on Telegram**.
+5. **Check allergy and diet needs** (Code) detects allergies (only with an allergy cue such as "allergic", "coeliac", "-free", "no ...", so "Do you have fish?" stays a menu question) and diets, then filters the menu by your columns.
+6. **Does any dish fit their needs?** (If): no → **Send no-match allergy reply** (fixed text, per-need matches, phone number). Yes → AI.
+7. **Answer question with AI** (Basic LLM Chain + Gemini 3.5 Flash-Lite) answers from the filtered menu in the customer's language, under 100 words.
+8. **Add allergy safety note** (Code) appends the fixed staff reminder to allergy answers, then **Send answer on Telegram**.
 
 ## Setup
 1. Create a bot with **@BotFather** (`/newbot`), copy the token and add a **Telegram API** credential on the trigger and both Telegram nodes.
 2. Create a Google Sheet with a tab named `Knowledge` and the header row `type | name | details | price | allergens | dietary`.
-   - Dishes: `menu | Lasagne al forno | Beef ragu, bechamel | £15.50 | gluten, milk, egg, celery |`
+   - Dishes: `menu | Lasagne al forno | Beef ragu, bechamel | £15.50 | gluten, milk, egg, celery |` (fill `allergens` for every dish: dishes left blank are never offered to allergy questions; put `vegan`, `vegetarian`, `gluten-free`, `halal` or `kosher` in `dietary`)
    - Everything else: `info | Opening hours | Tue-Sun 12:00-22:30, closed Mondays | | |`
 3. Put the Sheet ID in **Set restaurant details** (the long ID in the sheet URL) and add a **Google Sheets** credential.
 4. Add a **Google Gemini (PaLM) API** credential (free key at https://aistudio.google.com/app/apikey).
@@ -36,6 +38,7 @@ Telegram and Gemini's free tier cost nothing to run for a typical venue.
 
 ## Customisation ideas
 - Change tone or length in **Answer question with AI** (e.g. "playful, use one emoji").
+- Add allergen synonyms or other languages to the word lists in **Check allergy and diet needs**.
 - Add rows of type `info` for private hire, gift cards, dress code or delivery areas.
 - Swap the Telegram nodes for WhatsApp Business Cloud nodes once you have Meta access.
 
