@@ -1,0 +1,1140 @@
+{
+  "name": "Write researched blog posts with a multi-agent Gemini team and save them to Google Docs",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Write researched blog posts with a multi-agent Gemini team and save them to Google Docs\n\nA small team of AI agents that researches, outlines, writes and edits a blog post, then saves it to Google Docs. It runs on the free Gemini tier with no SerpAPI, Perplexity or OpenAI key. Give it a topic or keyword in a form. The research agent reads Wikipedia, Google Autocomplete questions and any source pages you add. The outline and writer agents build the article, and the editor agent scores it for SEO, readability, accuracy, voice and completeness. If the score is under your bar, the writer revises it.\n\n### How it works\n1. **Blog post brief form**: topic, audience, length, notes and source URLs.\n2. **Research agent** turns the fetched sources into a fact sheet with source links (no invented statistics).\n3. **Outline agent** plans title, slug, meta description, H2s and FAQs.\n4. **Writer agent** writes the Markdown article using only the facts.\n5. **Editor agent** scores it and lists fixes; **Revision agent** applies them once if the score is below `min_quality_score`.\n6. The article and its scores are written to a new Google Doc.\n\n### Setup\n1. Add **Google Gemini (PaLM) API** and **Google Docs** credentials.\n2. Put your Drive folder ID and brand voice in **Set blog writer settings**.\n3. Activate and open the form.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "c6866c29-464d-55f6-8933-5a761edfec15",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Write a blog post",
+        "formDescription": "Research, outline, write and edit, saved to Google Docs.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Topic or target keyword",
+              "fieldName": "topic",
+              "fieldType": "text",
+              "requiredField": true,
+              "placeholder": "e.g. meal prep for beginners"
+            },
+            {
+              "fieldLabel": "Who is it for?",
+              "fieldName": "audience",
+              "fieldType": "text",
+              "placeholder": "e.g. students cooking on a budget"
+            },
+            {
+              "fieldLabel": "Length (words)",
+              "fieldName": "word_count",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "800"
+                  },
+                  {
+                    "option": "1200"
+                  },
+                  {
+                    "option": "1600"
+                  },
+                  {
+                    "option": "2000"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Angle or notes for the writer (optional)",
+              "fieldName": "notes",
+              "fieldType": "textarea"
+            },
+            {
+              "fieldLabel": "Source URLs to use (optional, comma separated)",
+              "fieldName": "source_urls",
+              "fieldType": "text"
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Write it"
+        }
+      },
+      "id": "5a09c790-614a-5e71-b631-c050ab4b8209",
+      "name": "Blog post brief form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -100,
+        0
+      ],
+      "webhookId": "08a9e17d-39d2-5918-bed7-8ee4ebb38aad"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fe1e7cfb-53ee-5f8d-8490-bc484fc9e6b4",
+              "name": "brand_voice",
+              "value": "Friendly, practical and specific. Short sentences, real examples, no hype.",
+              "type": "string"
+            },
+            {
+              "id": "96078d58-d04e-5979-a4d3-41bb77da7a9d",
+              "name": "default_audience",
+              "value": "Busy beginners who want clear, trustworthy advice",
+              "type": "string"
+            },
+            {
+              "id": "04d3057a-ea08-5838-8c38-f51de2631ecb",
+              "name": "language",
+              "value": "British English",
+              "type": "string"
+            },
+            {
+              "id": "53465675-3c6d-59c9-af49-1c1673dda365",
+              "name": "wiki_language",
+              "value": "en",
+              "type": "string"
+            },
+            {
+              "id": "f714b104-8136-5dc5-b900-c24031afb629",
+              "name": "default_word_count",
+              "value": 1200,
+              "type": "number"
+            },
+            {
+              "id": "9dd9e375-b560-5c31-9f2d-ba242c615df2",
+              "name": "min_quality_score",
+              "value": 80,
+              "type": "number"
+            },
+            {
+              "id": "f735dfcd-54f0-5a5c-bdad-fd488f20a021",
+              "name": "max_edit_rounds",
+              "value": 1,
+              "type": "number"
+            },
+            {
+              "id": "d42d6bbe-67d2-5424-9f35-585d89db6a35",
+              "name": "docs_folder_id",
+              "value": "YOUR_DRIVE_FOLDER_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {},
+        "includeOtherFields": true
+      },
+      "id": "abefb692-d837-51f4-abf1-5912612e0539",
+      "name": "Set blog writer settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One clean brief, whether it came from the form or the Writing queue\nconst s = $('Set blog writer settings').first().json, j = $json;\nconst topic = String(j.topic || '').trim();\nif (!topic) throw new Error('No topic given.');\nreturn [{ json: { topic, primary_keyword: String(j.primary_keyword || topic).trim().toLowerCase(),\n  secondary_keywords: j.secondary_keywords || '', audience: j.audience || s.default_audience,\n  word_count: Math.min(Math.max(Number(j.word_count) || Number(s.default_word_count) || 1200, 400), 3500),\n  brief: j.brief || j.notes || '', source_urls: j.source_urls || '', queue_id: j.queue_id || '', from_queue: !!j.from_queue } }];"
+      },
+      "id": "32c92533-192d-5a30-86fa-1ae9f87d0665",
+      "name": "Prepare the brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Collect the brief",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "6cbbeedf-ca32-5b01-9658-a91709708aa6",
+      "name": "Section: Collect the brief",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://' + ($('Set blog writer settings').first().json.wiki_language || 'en') + '.wikipedia.org/w/api.php' }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "action",
+              "value": "query"
+            },
+            {
+              "name": "generator",
+              "value": "search"
+            },
+            {
+              "name": "gsrsearch",
+              "value": "={{ $json.primary_keyword }}"
+            },
+            {
+              "name": "gsrlimit",
+              "value": "3"
+            },
+            {
+              "name": "prop",
+              "value": "extracts|info"
+            },
+            {
+              "name": "inprop",
+              "value": "url"
+            },
+            {
+              "name": "exintro",
+              "value": "1"
+            },
+            {
+              "name": "explaintext",
+              "value": "1"
+            },
+            {
+              "name": "exlimit",
+              "value": "3"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-blog-writer/1.0 (template)"
+            }
+          ]
+        }
+      },
+      "id": "48435335-cc30-5280-ba5e-417e3d1fe88c",
+      "name": "Search Wikipedia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        680,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// What the research agent reads: Google Autocomplete questions, your source pages\nconst s = $('Set blog writer settings').first().json, b = $('Prepare the brief').first().json;\nconst kw = b.primary_keyword, hl = s.wiki_language || 'en';\nconst sug = q => `https://suggestqueries.google.com/complete/search?client=firefox&hl=${hl}&q=${encodeURIComponent(q)}`;\nconst out = [kw, `how ${kw}`, `what is ${kw}`, `why ${kw}`, `${kw} vs`, `best ${kw}`].map(q => ({ json: { kind: 'suggest', url: sug(q) } }));\nfor (const u of String(b.source_urls || '').split(/[\\s,]+/).filter(u => /^https?:\\/\\//.test(u)).slice(0, 4)) out.push({ json: { kind: 'page', url: u } });\nreturn out;"
+      },
+      "id": "175e1aa4-7585-584f-a066-cd08a1755657",
+      "name": "Plan research lookups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n-blog-writer/1.0)"
+            }
+          ]
+        }
+      },
+      "id": "ecff8c7d-cff4-560d-97e5-53a38c035779",
+      "name": "Fetch research sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn the fetched sources into compact research notes for the agents\nconst b = $('Prepare the brief').first().json;\nconst wiki = $('Search Wikipedia').first().json || {};\nconst pages = Object.values((wiki.query || {}).pages || {}).sort((a, c) => (a.index || 0) - (c.index || 0));\nconst strip = h => String(h || '').replace(/<script[\\s\\S]*?<\\/script>|<style[\\s\\S]*?<\\/style>|<nav[\\s\\S]*?<\\/nav>|<footer[\\s\\S]*?<\\/footer>|<header[\\s\\S]*?<\\/header>/gi, ' ')\n  .replace(/<!\\[CDATA\\[|\\]\\]>/g, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, \"'\").replace(/&quot;/g, '\"').replace(/\\s+/g, ' ').trim();\nconst reqs = $('Plan research lookups').all().map(i => i.json);\nconst questions = new Set(), sources = [], news = [], sitemap = [];\n$input.all().forEach((item, i) => {\n  const req = reqs[i] || {};\n  const body = String(item.json.data ?? item.json.body ?? '');\n  if (req.kind === 'suggest') { try { (JSON.parse(body)[1] || []).forEach(q => questions.add(String(q))); } catch (e) {} }\n  else if (req.kind === 'page') { const t = strip(body); if (t.length > 200) sources.push({ url: req.url, text: t.slice(0, 4000) }); }\n  else if (req.kind === 'feed') {\n    for (const m of body.matchAll(/<item[\\s>]([\\s\\S]*?)<\\/item>|<entry[\\s>]([\\s\\S]*?)<\\/entry>/gi)) {\n      const x = m[1] || m[2];\n      const title = strip((x.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i) || [])[1]);\n      const link = (x.match(/<link>([^<]+)<\\/link>/i) || x.match(/<link[^>]+href=\"([^\"]+)\"/i) || [])[1] || '';\n      const desc = strip((x.match(/<description>([\\s\\S]*?)<\\/description>|<summary[^>]*>([\\s\\S]*?)<\\/summary>/i) || []).slice(1).find(Boolean));\n      if (title) news.push({ title, link, desc: desc.slice(0, 300) });\n    }\n  }\n  else if (req.kind === 'sitemap') { for (const m of body.matchAll(/<loc>\\s*([^<\\s]+)\\s*<\\/loc>/gi)) sitemap.push(m[1]); }\n});\nconst words = t => String(t).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 3);\nconst kwWords = words(b.primary_keyword + ' ' + b.topic);\nconst relNews = news.filter(n => kwWords.some(w => (n.title + ' ' + n.desc).toLowerCase().includes(w))).slice(0, 8);\nconst topicWords = words(b.primary_keyword + ' ' + b.secondary_keywords + ' ' + b.topic);\nconst slug = u => { try { return words(decodeURIComponent(new URL(u).pathname)); } catch (e) { return []; } };\nconst internal_links = sitemap.map(u => ({ u, n: slug(u).filter(w => topicWords.includes(w)).length })).filter(l => l.n > 0)\n  .sort((a, c) => c.n - a.n).slice(0, 8).map(l => l.u);\nconst wikiText = pages.map(p => `${p.title} (${p.fullurl || 'wikipedia'}): ${String(p.extract || '').slice(0, 1500)}`).join('\\n\\n');\nconst notes = [wikiText && 'WIKIPEDIA\\n' + wikiText, sources.length && 'SOURCE PAGES\\n' + sources.map(x => `[${x.url}]\\n${x.text}`).join('\\n\\n'),\n  relNews.length && 'RECENT NEWS\\n' + relNews.map(n => `- ${n.title} (${n.link}): ${n.desc}`).join('\\n')].filter(Boolean).join('\\n\\n').slice(0, 14000);\nreturn [{ json: { ...b, research_notes: notes || 'No sources could be fetched. Use only well-established general knowledge and avoid specific statistics.',\n  questions: [...questions].filter(q => q !== b.primary_keyword).slice(0, 15), internal_links, source_count: pages.length + sources.length + relNews.length,\n  sources: [...pages.map(p => p.fullurl).filter(Boolean), ...sources.map(x => x.url), ...relNews.map(n => n.link)].slice(0, 12) } }];"
+      },
+      "id": "ab727141-66b7-5137-a23c-be6fd3c10650",
+      "name": "Collect research notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the RESEARCH agent in a blog-writing team. Read the notes and prepare a fact sheet for the writer.\n\nTopic: {{ $json.topic }}\nPrimary keyword: {{ $json.primary_keyword }} | secondary keywords: {{ $json.secondary_keywords || '-' }}\nAudience: {{ $json.audience }}\nEditor's brief: {{ $json.brief || 'none' }}\nQuestions people search: {{ $json.questions.join(' | ') || 'none found' }}\n\nResearch notes:\n\"\"\"{{ $json.research_notes }}\"\"\"\n\nReturn:\n- angle: the most useful angle for this audience.\n- key_facts: 5-12 facts taken ONLY from the notes, each with its source URL (\"general knowledge\" for widely known basics). Never invent statistics, dates or quotes.\n- questions_to_answer: 4-8 questions the article must answer.\n- terms: related terms and entities to cover naturally.\n- cautions: claims to avoid or hedge (outdated, disputed or needing a source).",
+        "hasOutputParser": true
+      },
+      "id": "9bc15f8b-2271-5c49-844f-02a2ea9926b0",
+      "name": "Research agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1640,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.2,
+          "maxOutputTokens": 4096
+        }
+      },
+      "id": "83e91a31-a941-51ad-9923-687d7364d420",
+      "name": "Gemini (research)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1640,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"angle\": \"A realistic first week for complete beginners\",\n  \"key_facts\": [\n    {\n      \"fact\": \"Cooked rice should be cooled and refrigerated within an hour.\",\n      \"source\": \"https://en.wikipedia.org/wiki/Meal_preparation\"\n    }\n  ],\n  \"questions_to_answer\": [\n    \"How long does meal prep last?\"\n  ],\n  \"terms\": [\n    \"batch cooking\",\n    \"food safety\"\n  ],\n  \"cautions\": [\n    \"Do not give exact fridge times without a source\"\n  ]\n}"
+      },
+      "id": "4a4dc779-07a4-5bf9-9e74-24b54eeb581b",
+      "name": "Fact sheet format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1780,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Research agent: Wikipedia, Autocomplete questions and your sources",
+        "height": 500,
+        "width": 1300,
+        "color": 7
+      },
+      "id": "3ee12773-a377-5f05-970a-3dfaf34c551e",
+      "name": "Section: Research agent: Wikipedia, Autocomplete questions and your sources",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        620,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the OUTLINE agent. Build the structure for this article.\n\nTopic: {{ $('Collect research notes').first().json.topic }} | primary keyword: {{ $('Collect research notes').first().json.primary_keyword }} | secondary: {{ $('Collect research notes').first().json.secondary_keywords || '-' }}\nAudience: {{ $('Collect research notes').first().json.audience }} | target length: about {{ $('Collect research notes').first().json.word_count }} words | language: {{ $('Set blog writer settings').first().json.language }}\nAngle: {{ $json.output.angle }}\nQuestions to answer: {{ ($json.output.questions_to_answer || []).join(' | ') }}\nKey facts: {{ JSON.stringify($json.output.key_facts || []) }}\nEditor's brief: {{ $('Collect research notes').first().json.brief || 'none' }}\n\nReturn title (under 60 characters, includes the primary keyword naturally), slug, meta_description (under 155 characters), intro_hook, sections (4-8 H2s, each with points and a words target; the targets add up to about the total), faq (3-5 questions with a short answer hint) and cta.",
+        "hasOutputParser": true
+      },
+      "id": "16a91dd5-50a6-5fa3-89cc-8c7ea3f03f10",
+      "name": "Outline agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2060,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.4,
+          "maxOutputTokens": 4096
+        }
+      },
+      "id": "0e4051f3-b54c-5c53-ac57-86c53304b4f6",
+      "name": "Gemini (outline)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        2060,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"title\": \"Meal Prep for Beginners: Your First Week\",\n  \"slug\": \"meal-prep-for-beginners\",\n  \"meta_description\": \"A simple first week of meal prep for beginners.\",\n  \"intro_hook\": \"Sunday, two hours, five lunches.\",\n  \"sections\": [\n    {\n      \"h2\": \"What meal prep is (and isn't)\",\n      \"points\": [\n        \"three styles\"\n      ],\n      \"words\": 200\n    }\n  ],\n  \"faq\": [\n    {\n      \"q\": \"How long does meal prep keep?\",\n      \"a_hint\": \"Use the fridge guidance from the facts\"\n    }\n  ],\n  \"cta\": \"Try one recipe this weekend.\"\n}"
+      },
+      "id": "fc090db9-68e9-592e-935e-8a7466c26a31",
+      "name": "Outline format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2200,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the WRITER agent. Write the full article in Markdown.\n\nOutline: {{ JSON.stringify($json.output) }}\nFacts you may use (with sources): {{ JSON.stringify($('Research agent').first().json.output.key_facts || []) }}\nCautions: {{ ($('Research agent').first().json.output.cautions || []).join(' | ') || 'none' }}\nPrimary keyword: {{ $('Collect research notes').first().json.primary_keyword }} | secondary: {{ $('Collect research notes').first().json.secondary_keywords || '-' }}\nAudience: {{ $('Collect research notes').first().json.audience }} | brand voice: {{ $('Set blog writer settings').first().json.brand_voice }} | language: {{ $('Set blog writer settings').first().json.language }}\nTarget length: about {{ $('Collect research notes').first().json.word_count }} words.\n\nRules:\n- Start with \"# \" + the title, then a 2-3 sentence intro that delivers the hook.\n- Use the outline's H2s (##), short paragraphs and lists where they help the reader.\n- Put the primary keyword in the first 100 words and in one or two headings, naturally. Use secondary keywords only where they fit.\n- Use only the facts above. If you need a number you don't have, write around it. When you use a fact from a URL, link it inline as [text](url).\n- End with \"## FAQ\" (each question as ### with a 2-4 sentence answer), then a short conclusion with the call to action.\n- No filler (\"In today's fast-paced world\", \"delve\", \"game-changer\", \"unlock\"). Output only the article."
+      },
+      "id": "8cc6a735-eccc-5c39-852a-53fa86d126a5",
+      "name": "Writer agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2380,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.7,
+          "maxOutputTokens": 8192
+        }
+      },
+      "id": "2d810100-6f1e-5816-b80e-963bc5d3e5df",
+      "name": "Gemini (writer)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        2380,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Latest version of the article; round 1 = first draft, 2+ = revisions\nconst text = String($json.text || '').replace(/<think>[\\s\\S]*?<\\/think>/g, '').replace(/^\\s*```(?:markdown|md)?\\s*/i, '').replace(/```\\s*$/, '').trim();\nreturn [{ json: { article: text, round: $runIndex + 1, word_count: text.split(/\\s+/).filter(Boolean).length } }];"
+      },
+      "id": "8013dac1-a865-5d64-8c8a-07d173d892b9",
+      "name": "Current draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Outline and writer agents",
+        "height": 500,
+        "width": 860,
+        "color": 7
+      },
+      "id": "1662c8c5-74f3-5e00-b020-95636df26b87",
+      "name": "Section: Outline and writer agents",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the EDITOR and SEO agent. Score this draft strictly and list concrete fixes.\n\nPrimary keyword: {{ $('Collect research notes').first().json.primary_keyword }} | secondary: {{ $('Collect research notes').first().json.secondary_keywords || '-' }}\nAudience: {{ $('Collect research notes').first().json.audience }} | brand voice: {{ $('Set blog writer settings').first().json.brand_voice }}\nTarget length: about {{ $('Collect research notes').first().json.word_count }} words | this draft: {{ $json.word_count }} words (round {{ $json.round }})\nFacts the writer was given: {{ JSON.stringify($('Research agent').first().json.output.key_facts || []) }}\nQuestions it must answer: {{ ($('Research agent').first().json.output.questions_to_answer || []).join(' | ') }}\n\nDraft:\n\"\"\"{{ $json.article }}\"\"\"\n\nScore each 0-100: seo (keyword in title, intro and a heading; clear H2/H3 structure; links), readability (short paragraphs, plain words, scannable), accuracy (every specific claim is backed by the facts; anything invented scores low), voice (matches the brand voice, no AI cliches), completeness (answers the questions, within 15% of the target length).\noverall: weighted average with accuracy counted twice.\nmust_fix: up to 8 specific, actionable fixes, quoting the sentence to change. Empty if none.\nverdict: \"publish\" or \"revise\".",
+        "hasOutputParser": true
+      },
+      "id": "6aaa90e3-6777-5f39-b410-d3142b3fd14d",
+      "name": "Editor agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        3000,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.1,
+          "maxOutputTokens": 4096
+        }
+      },
+      "id": "93f6d213-0743-5a24-9402-72fe2fd2d5b5",
+      "name": "Gemini (editor)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        3000,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"scores\": {\n    \"seo\": 85,\n    \"readability\": 80,\n    \"accuracy\": 70,\n    \"voice\": 85,\n    \"completeness\": 75\n  },\n  \"overall\": 78,\n  \"must_fix\": [\n    \"'Rice keeps for a week' is not in the facts: remove it or hedge it.\"\n  ],\n  \"verdict\": \"revise\"\n}"
+      },
+      "id": "22667079-4daf-507d-a6f5-74eb9ee7a668",
+      "name": "Review format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        3140,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Revise again only if the score is under the bar, the editor listed fixes and rounds are left\nconst s = $('Set blog writer settings').first().json, d = $('Current draft').last().json, o = $json.output || {};\nconst sc = o.scores || {};\nconst vals = ['seo', 'readability', 'accuracy', 'voice', 'completeness'].map(k => Number(sc[k])).filter(n => !isNaN(n));\nconst overall = Math.round(Number(o.overall) || (vals.length ? vals.reduce((a, c) => a + c, 0) / vals.length : 0));\nconst fixes = (o.must_fix || []).filter(Boolean);\nconst needs = overall < (Number(s.min_quality_score) || 80) && fixes.length > 0 && d.round <= (Number(s.max_edit_rounds) || 1);\nreturn [{ json: { ...d, scores: sc, overall, must_fix: fixes, verdict: o.verdict || '', needs_revision: needs } }];"
+      },
+      "id": "afa16852-cd04-572b-ab6f-738dd18113db",
+      "name": "Decide next step",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c061cbf1-65aa-579c-8d6c-27fd59f86c00",
+              "leftValue": "={{ $json.needs_revision }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "7e29e1ac-7949-5dc2-bd85-91dae7edcf09",
+      "name": "Needs another edit?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the WRITER agent revising your draft after the editor's review.\n\nApply every fix below, keep everything else that works, keep the Markdown structure and about {{ $('Collect research notes').first().json.word_count }} words. Use only these facts: {{ JSON.stringify($('Research agent').first().json.output.key_facts || []) }}\nBrand voice: {{ $('Set blog writer settings').first().json.brand_voice }} | language: {{ $('Set blog writer settings').first().json.language }}\n\nEditor's fixes:\n{{ $json.must_fix.map((f, i) => (i + 1) + '. ' + f).join('\\n') }}\n\nDraft:\n\"\"\"{{ $json.article }}\"\"\"\n\nOutput only the full revised article."
+      },
+      "id": "d0f45fe0-0709-53fe-8672-7b69d86ee19f",
+      "name": "Revision agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        3800,
+        -150
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.5,
+          "maxOutputTokens": 8192
+        }
+      },
+      "id": "6d4319d2-a512-56af-b75d-b52a4eee7ef6",
+      "name": "Gemini (revision)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        3800,
+        70
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// Final clean-up: Markdown for Google Docs, simple HTML for WordPress, metadata\nconst s = $('Set blog writer settings').first().json, b = $('Collect research notes').first().json, ol = $('Outline agent').first().json.output || {}, d = $('Decide next step').last().json;\nlet md = d.article;\nif (!/^#\\s/.test(md)) md = `# ${ol.title || b.topic}\\n\\n` + md;\nconst title = ((md.match(/^#\\s+(.+)$/m) || [])[1] || ol.title || b.topic).trim();\nconst body = md.replace(/^#\\s+.+\\n+/, '');\nconst inline = t => esc(t).replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>').replace(/(^|\\W)\\*(?!\\s)(.+?)\\*(?=\\W|$)/g, '$1<em>$2</em>')\n  .replace(/\\[([^\\]]+)\\]\\((https?:[^)\\s]+)\\)/g, '<a href=\"$2\">$1</a>');\nconst html = []; let list = null;\nconst close = () => { if (list) { html.push(`</${list}>`); list = null; } };\nfor (const raw of body.split('\\n')) {\n  const l = raw.trim();\n  let m;\n  if (!l) { close(); continue; }\n  if ((m = l.match(/^(#{2,4})\\s+(.+)/))) { close(); html.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); }\n  else if ((m = l.match(/^[-*]\\s+(.+)/))) { if (list !== 'ul') { close(); html.push('<ul>'); list = 'ul'; } html.push(`<li>${inline(m[1])}</li>`); }\n  else if ((m = l.match(/^\\d+[.)]\\s+(.+)/))) { if (list !== 'ol') { close(); html.push('<ol>'); list = 'ol'; } html.push(`<li>${inline(m[1])}</li>`); }\n  else if (l.startsWith('>')) { close(); html.push(`<blockquote>${inline(l.replace(/^>\\s?/, ''))}</blockquote>`); }\n  else { close(); html.push(`<p>${inline(l)}</p>`); }\n}\nclose();\nconst faq_schema = '';\nconst words = body.split(/\\s+/).filter(Boolean).length;\nconst sc = d.scores || {};\nconst header = [`Meta description: ${ol.meta_description || ''}`, `Slug: ${ol.slug || ''}`, `Primary keyword: ${b.primary_keyword}`,\n  `Words: ${words} | Quality score: ${d.overall}/100 (SEO ${sc.seo ?? '-'}, readability ${sc.readability ?? '-'}, accuracy ${sc.accuracy ?? '-'}, voice ${sc.voice ?? '-'}, completeness ${sc.completeness ?? '-'}) | Edit rounds: ${d.round}`,\n  d.must_fix.length && d.needs_revision === false && d.overall < (Number(s.min_quality_score) || 80) ? `Editor's open points: ${d.must_fix.join(' / ')}` : '',\n  `Sources: ${(b.sources || []).join(' , ') || 'none'}`].filter(Boolean).join('\\n');\nconst doc_text = `${title}\\n\\n${header}\\n\\n----------\\n\\n${body}` + (faq_schema ? `\\n\\n----------\\nFAQ schema (paste into a Custom HTML block):\\n<script type=\"application/ld+json\">${faq_schema}</script>` : '');\nreturn [{ json: { title, slug: ol.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), meta_description: ol.meta_description || '',\n  markdown: md, html: html.join('\\n') + (faq_schema ? `\\n<script type=\"application/ld+json\">${faq_schema}</script>` : ''), faq_schema,\n  words, overall: d.overall, scores: sc, rounds: d.round, open_points: d.must_fix.join(' / '), doc_text } }];"
+      },
+      "id": "46df3566-7d30-5363-82bc-437615c28452",
+      "name": "Finalise article",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4100,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. Editor agent: score, fix, repeat",
+        "height": 650,
+        "width": 1320,
+        "color": 7
+      },
+      "id": "ab85598f-b91e-5bf7-bd91-87c2736f8710",
+      "name": "Section: Editor agent: score, fix, repeat",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2940,
+        -270
+      ]
+    },
+    {
+      "parameters": {
+        "folderId": "={{ $('Set blog writer settings').first().json.docs_folder_id }}",
+        "title": "={{ $json.title }}"
+      },
+      "id": "833d9bc7-81c5-5f10-8082-8a5455cc127b",
+      "name": "Create the Google Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        160
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('Finalise article').first().json.doc_text }}"
+            }
+          ]
+        }
+      },
+      "id": "61beff9e-cd81-5615-8aa7-635d45303fa6",
+      "name": "Write the article into the Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        4640,
+        160
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "=<h2>{{ $('Finalise article').first().json.title }}</h2><p>{{ $('Finalise article').first().json.words }} words · quality score <b>{{ $('Finalise article').first().json.overall }}/100</b> · {{ $('Finalise article').first().json.rounds }} edit round(s)</p><p><a href=\"https://docs.google.com/document/d/{{ $('Create the Google Doc').first().json.id }}/edit\" target=\"_blank\">Open the Google Doc</a></p><p><i>{{ $('Finalise article').first().json.meta_description }}</i></p><div style=\"max-height:420px;overflow:auto;border:1px solid #ddd;padding:12px\">{{ $('Finalise article').first().json.html }}</div>",
+        "options": {
+          "formTitle": "Your article"
+        }
+      },
+      "id": "ef567f8d-70fb-5c8b-9262-8dae123506aa",
+      "name": "Show the article",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        4880,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 5. Save to Google Docs",
+        "height": 300,
+        "width": 700,
+        "color": 7
+      },
+      "id": "f8abf11a-0c44-5eb2-800c-59348a3ea8a2",
+      "name": "Section: Save to Google Docs",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4340,
+        40
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "6d3ab0d5-51c3-58d0-8fc2-a529a4350de9",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "ecf02c14-aa8d-5276-94ed-3081ffc85a29",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "973b5f55-2ae9-5a51-af73-19288b004caf",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Blog post brief form": {
+      "main": [
+        [
+          {
+            "node": "Set blog writer settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set blog writer settings": {
+      "main": [
+        [
+          {
+            "node": "Prepare the brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (research)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Research agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fact sheet format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Research agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare the brief": {
+      "main": [
+        [
+          {
+            "node": "Search Wikipedia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Wikipedia": {
+      "main": [
+        [
+          {
+            "node": "Plan research lookups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan research lookups": {
+      "main": [
+        [
+          {
+            "node": "Fetch research sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch research sources": {
+      "main": [
+        [
+          {
+            "node": "Collect research notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect research notes": {
+      "main": [
+        [
+          {
+            "node": "Research agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (outline)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Outline agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outline format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Outline agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (writer)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Writer agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research agent": {
+      "main": [
+        [
+          {
+            "node": "Outline agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outline agent": {
+      "main": [
+        [
+          {
+            "node": "Writer agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Writer agent": {
+      "main": [
+        [
+          {
+            "node": "Current draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (editor)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Editor agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Editor agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (revision)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Revision agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current draft": {
+      "main": [
+        [
+          {
+            "node": "Editor agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editor agent": {
+      "main": [
+        [
+          {
+            "node": "Decide next step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide next step": {
+      "main": [
+        [
+          {
+            "node": "Needs another edit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs another edit?": {
+      "main": [
+        [
+          {
+            "node": "Revision agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finalise article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revision agent": {
+      "main": [
+        [
+          {
+            "node": "Current draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalise article": {
+      "main": [
+        [
+          {
+            "node": "Create the Google Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create the Google Doc": {
+      "main": [
+        [
+          {
+            "node": "Write the article into the Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write the article into the Doc": {
+      "main": [
+        [
+          {
+            "node": "Show the article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
