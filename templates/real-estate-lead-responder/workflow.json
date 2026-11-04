@@ -1,0 +1,653 @@
+{
+  "name": "Qualify real estate leads from portal emails and web forms with Gemini, Gmail drafts and Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Qualify real estate leads from portal emails and web forms with Gemini, Gmail drafts and Google Sheets\n\nAnswer every property enquiry in minutes instead of hours. New lead e-mails from Rightmove, Zoopla, OnTheMarket, Zillow, Realtor.com and similar portals, or a POST from your website form, are read automatically. Gemini pulls out budget, timeline, approval in principle / pre-approval and buying position, scores the lead and writes a personal first reply. The reply waits as a Gmail draft, the lead goes into a Google Sheets CRM, and hot leads are e-mailed to you straight away.\n\n### How it works\n1. **New portal or enquiry e-mail** checks Gmail every minute; **Website enquiry form** is a webhook for your site's form.\n2. Code parsers extract name, e-mail, phone, message, property and enquiry type.\n3. **Qualify and draft the reply** returns intent, budget, timeline, pre-approval, position, an AI score and the reply.\n4. **Score the lead** adds clear rules (pre-approved, moving soon, phone given, valuation request) for a final 0-100 score.\n5. The lead is appended to `Leads`, a reply draft is created and hot leads trigger an e-mail alert.\n\n### Setup\n1. Add **Gmail**, **Google Sheets** and **Google Gemini (PaLM) API** credentials.\n2. Create a `Leads` tab (columns in the README) and fill in **Set responder settings** (agency, signature, booking link, Sheet ID, your e-mail).\n3. Adjust the Gmail search in the trigger to your portals, point your website form at the webhook URL and activate.\n\nFailure alerts: fill in the alert node in **Alert on errors** and choose this workflow under **Settings > Error workflow**.",
+        "height": 1000,
+        "width": 600
+      },
+      "id": "f8116489-af58-53dc-be96-c6dcb40c8e17",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "(from:(rightmove.co.uk OR zoopla.co.uk OR onthemarket.com OR zillow.com OR realtor.com OR homes.com OR trulia.com OR redfin.com OR openrent.co.uk) OR label:leads) -from:me",
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "df2a975e-bffd-57f3-a483-020919a5a4e1",
+      "name": "New portal or enquiry e-mail",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -100,
+        -100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "property-enquiry",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "43187e36-0f70-56bc-a479-13cd3db196a9",
+      "name": "Website enquiry form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -100,
+        140
+      ],
+      "webhookId": "43187e36-0f70-56bc-a479-13cd3db196a9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn a portal or website enquiry e-mail into one clean lead.\n// Knows Rightmove, Zoopla, OnTheMarket, Zillow, Realtor.com, Homes.com, Trulia, Redfin, OpenRent; anything else is read as a plain enquiry.\nconst PORTALS = [['rightmove', 'Rightmove'], ['zoopla', 'Zoopla'], ['onthemarket', 'OnTheMarket'], ['zillow', 'Zillow'],\n  ['realtor.com', 'Realtor.com'], ['homes.com', 'Homes.com'], ['trulia', 'Trulia'], ['redfin', 'Redfin'], ['openrent', 'OpenRent']];\nconst isSystem = e => PORTALS.some(([k]) => e.includes(k)) || /no-?reply|donotreply|notifications?@|mailer-daemon/.test(e);\nreturn $input.all().map(item => {\n  const m = item.json;\n  const fromAddr = String(m.from?.value?.[0]?.address || m.from?.text || m.From || '').toLowerCase();\n  const fromName = m.from?.value?.[0]?.name || '';\n  const replyTo = String(m.replyTo?.value?.[0]?.address || '').toLowerCase();\n  const html = m.html || m.textAsHtml || '';\n  const text = String(m.text || html.replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/(p|div|tr|li|h\\d)>/gi, '\\n').replace(/<[^>]+>/g, ' ') || m.snippet || '')\n    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/[ \\t]+/g, ' ').replace(/\\r/g, '');\n  const subject = m.subject || m.Subject || '';\n  const hay = (fromAddr + ' ' + subject + ' ' + text.slice(0, 4000)).toLowerCase();\n  const portal = (PORTALS.find(([k]) => fromAddr.includes(k)) || PORTALS.find(([k]) => hay.includes(k + '.')) || [null, 'Email'])[1];\n  const field = (...labels) => {\n    for (const l of labels) {\n      const x = text.match(new RegExp('(?:^|\\\\n)\\\\s*(?:' + l + ')\\\\s*[:\\\\-]\\\\s*([^\\\\n]+)', 'i'));\n      if (x && x[1].trim()) return x[1].trim();\n    }\n    return '';\n  };\n  const all = (text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi) || []).map(e => e.toLowerCase());\n  let email = (field('e-?mail(?: address)?', 'email') .match(/[^\\s<>()]+@[^\\s<>()]+\\.[a-z]{2,}/i) || [''])[0].toLowerCase();\n  if (!email && replyTo && !isSystem(replyTo)) email = replyTo;\n  if (!email) email = all.find(e => !isSystem(e) && e !== fromAddr) || '';\n  if (!email && portal === 'Email' && !isSystem(fromAddr)) email = fromAddr;\n  const name = field('name', 'full name', 'your name', 'contact name', 'customer name', 'buyer name')\n    || [field('first name'), field('last name|surname')].filter(Boolean).join(' ') || (portal === 'Email' ? fromName : '');\n  const phone = field('phone(?: number)?', 'telephone', 'tel', 'mobile', 'contact number').replace(/[^+0-9() -]/g, '').trim();\n  let message = field('message', 'comments?', 'enquiry', 'inquiry', 'additional (?:information|comments)', 'questions?');\n  if (message.length < 25) message = (message ? message + ' | ' : '') + text.replace(/\\s+/g, ' ').slice(0, 1200);\n  const ref = field('property ref(?:erence)?', 'listing (?:id|ref|number)', 'mls ?#?', 'property id', 'ref(?:erence)?(?: number)?');\n  const address = field('property(?: address)?', 'address', 'listing', 'home address')\n    || ((subject.match(/(?:enquiry|inquiry|interest|request|lead)(?: about| for| on| re|:)\\s*(.+)$/i) || [])[1] || '');\n  const type = /valuation|value my|appraisal|sell my|selling my|market appraisal/i.test(hay) ? 'valuation'\n    : /viewing|showing|tour|\\bview\\b|arrange a visit/i.test(hay) ? 'viewing'\n    : /to let|to rent|rental|tenan|letting|pcm|per month/i.test(hay) ? 'rental' : 'general';\n  return { json: { source: portal, received_at: $now.toFormat('yyyy-MM-dd HH:mm'), name: name.slice(0, 80), email, phone,\n    message: message.slice(0, 1500), property_ref: ref.slice(0, 40), property_address: address.slice(0, 160),\n    listed_price: field('price', 'asking price', 'list price'), budget_given: field('budget', 'max(?:imum)? budget', 'price range'),\n    timeline_given: field('timeline', 'moving date', 'move date', 'when'), enquiry_type: type, subject,\n    gmail_message_id: m.id || '', gmail_thread_id: m.threadId || '' } };\n});"
+      },
+      "id": "047f4439-d612-5039-ac56-b594a41c8a2c",
+      "name": "Read the portal e-mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map common website-form field names (Contact Form 7, Elementor, Webflow, Typeform-style) to lead fields\nreturn $input.all().map(item => {\n  const b = item.json.body && typeof item.json.body === 'object' ? item.json.body : item.json;\n  const g = (...k) => { for (const x of k) { const v = b[x]; if (v !== undefined && v !== null && String(v).trim()) return String(v).trim(); } return ''; };\n  const name = g('name', 'full_name', 'fullName', 'your-name', 'Name') || [g('first_name', 'firstName', 'fname'), g('last_name', 'lastName', 'lname')].filter(Boolean).join(' ');\n  const message = g('message', 'comments', 'enquiry', 'inquiry', 'your-message', 'notes', 'Message');\n  const t = (message + ' ' + g('type', 'enquiry_type')).toLowerCase();\n  return { json: { source: g('source') || 'Website', received_at: $now.toFormat('yyyy-MM-dd HH:mm'), name: name.slice(0, 80),\n    email: g('email', 'your-email', 'email_address', 'Email').toLowerCase(), phone: g('phone', 'tel', 'telephone', 'mobile', 'your-phone', 'Phone'),\n    message: message.slice(0, 1500), property_ref: g('property_ref', 'listing_id', 'ref', 'property_id', 'mls'),\n    property_address: g('property', 'property_address', 'listing', 'address'), listed_price: g('price'),\n    budget_given: g('budget', 'max_budget', 'price_range'), timeline_given: g('timeline', 'move_date', 'when'),\n    enquiry_type: g('type', 'enquiry_type') || (/valuation|sell my|appraisal/.test(t) ? 'valuation' : /viewing|showing|tour/.test(t) ? 'viewing' : /rent|let/.test(t) ? 'rental' : 'general'),\n    subject: '', gmail_message_id: '', gmail_thread_id: '' } };\n});"
+      },
+      "id": "e2ef0c36-fc8c-59ed-93b2-c3c6926c61e3",
+      "name": "Read the web form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "06ac7d05-cdb5-5013-9b82-051654e61c2f",
+              "name": "agency_name",
+              "value": "Your Agency",
+              "type": "string"
+            },
+            {
+              "id": "68dcf8fd-83f4-536e-a462-181ed93892c6",
+              "name": "agent_name",
+              "value": "Alex",
+              "type": "string"
+            },
+            {
+              "id": "eebfd3e9-9e8e-5db3-9adc-e3b7e0f1e2a9",
+              "name": "agent_phone",
+              "value": "01234 567890",
+              "type": "string"
+            },
+            {
+              "id": "e843b94f-c512-50c7-9514-4bd6650c5c89",
+              "name": "signature",
+              "value": "Best wishes,\nAlex\nYour Agency | 01234 567890",
+              "type": "string"
+            },
+            {
+              "id": "2f2e5965-4df5-5f4a-9e26-69b84e151f85",
+              "name": "booking_link",
+              "value": "https://calendly.com/your-agency/viewing",
+              "type": "string"
+            },
+            {
+              "id": "ed9fb6e6-c6d1-55da-b906-c5b5db4c01f3",
+              "name": "office_hours",
+              "value": "Mon-Fri 9:00-17:30, Sat 9:00-13:00",
+              "type": "string"
+            },
+            {
+              "id": "70fc3384-8074-55e0-93f9-e9cb0aa59710",
+              "name": "market",
+              "value": "UK",
+              "type": "string"
+            },
+            {
+              "id": "04d3057a-ea08-5838-8c38-f51de2631ecb",
+              "name": "language",
+              "value": "British English",
+              "type": "string"
+            },
+            {
+              "id": "1683c379-a2a9-5afc-99b8-f053accf41f2",
+              "name": "hot_score",
+              "value": 70,
+              "type": "number"
+            },
+            {
+              "id": "ab26bdac-0ebf-503e-b2cb-47e43831ec01",
+              "name": "notify_email",
+              "value": "YOUR_EMAIL",
+              "type": "string"
+            },
+            {
+              "id": "808f7377-94e6-58df-b024-c53222070c97",
+              "name": "sheet_id",
+              "value": "YOUR_SHEET_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {},
+        "includeOtherFields": true
+      },
+      "id": "8cef5387-2e5a-5a4d-bdae-ef961305997e",
+      "name": "Set responder settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Receive the enquiry",
+        "height": 540,
+        "width": 700,
+        "color": 7
+      },
+      "id": "7efdab57-e5fa-5999-a04e-dc55e432b9cb",
+      "name": "Section: Receive the enquiry",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the lead assistant for {{ $('Set responder settings').first().json.agency_name }}, an estate agency ({{ $('Set responder settings').first().json.market }}). Qualify this new enquiry and write the first reply.\n\nSource: {{ $json.source }} | enquiry type: {{ $json.enquiry_type }}\nName: {{ $json.name || 'unknown' }} | e-mail: {{ $json.email || 'none' }} | phone: {{ $json.phone || 'none' }}\nProperty asked about: {{ $json.property || $json.property_address || $json.property_ref || 'not stated' }}\nBudget given: {{ $json.budget_given || '-' }} | timeline given: {{ $json.timeline_given || '-' }}\nMessage: \"\"\"{{ $json.message }}\"\"\"\n{{ $json.is_repeat ? 'They have enquired before (' + $json.previous_enquiries + ' time(s)); keep it short and personal.' : '' }}\n\nOur details: agent {{ $('Set responder settings').first().json.agent_name }}, phone {{ $('Set responder settings').first().json.agent_phone }}, office hours {{ $('Set responder settings').first().json.office_hours }}, booking link {{ $('Set responder settings').first().json.booking_link }}.\n\nRules:\n- Extract only what the enquiry says; anything not stated is \"unknown\". pre_approved is yes, no or unknown (mortgage approval in principle / pre-approval / proof of funds or cash).\n- budget as written with currency; budget_max a number or null. timeline_months = months until they want to move (0 = now), null if unknown.\n- position: first-time buyer, needs to sell first, chain-free, cash buyer, renter, landlord, vendor (valuation) or unknown.\n- ai_score 0-100: how ready and able they are to transact soon.\n- reply_body: warm and specific, under 140 words, in {{ $('Set responder settings').first().json.language }}. Thank them by first name, answer what they asked using ONLY the property details above (never invent availability, prices, features or viewing times), offer a viewing or valuation through the booking link or ask for two times that suit them, and ask at most two questions about the biggest gaps (budget, approval in principle, timeline, whether they need to sell first). No pressure tactics. End with exactly this signature:\n{{ $('Set responder settings').first().json.signature }}\n- reply_subject: short; mention the property if known.",
+        "hasOutputParser": true
+      },
+      "id": "1a12ae32-bcf2-5ac3-bd72-dd9916658c87",
+      "name": "Qualify and draft the reply",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        680,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.4,
+          "maxOutputTokens": 4096
+        }
+      },
+      "id": "244123da-6de0-55d3-a38f-4f04ea15b11b",
+      "name": "Gemini 3.5 Flash-Lite",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        680,
+        220
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"intent\": \"buy\",\n  \"budget\": \"\\u00a3450,000\",\n  \"budget_max\": 450000,\n  \"timeline\": \"within 3 months\",\n  \"timeline_months\": 3,\n  \"pre_approved\": \"yes\",\n  \"position\": \"first-time buyer\",\n  \"ai_score\": 80,\n  \"summary\": \"First-time buyer with approval in principle, wants to view 12 Elm Road this week.\",\n  \"missing_info\": [\n    \"preferred viewing times\"\n  ],\n  \"reply_subject\": \"Viewing 12 Elm Road\",\n  \"reply_body\": \"Hi Sam,\\n\\nThanks for your enquiry about 12 Elm Road...\\n\\nBest wishes,\\nAlex\"\n}"
+      },
+      "id": "8cb79160-e962-54ff-ab5b-46823cb531c8",
+      "name": "Lead qualification format",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        820,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// Blend the AI read-out with simple rules -> final score, temperature, next follow-up date and the CRM row\nconst s = $('Set responder settings').first().json;\nconst days = String(s.followup_days || '1,3,7').split(',').map(Number).filter(n => n > 0);\nconst hot = Number(s.hot_score) || 70;\nconst src = $('Set responder settings').all();\nconst mode = String(s.reply_mode || 'draft').toLowerCase() === 'send' ? 'send' : 'draft';\nreturn $input.all().map((item, i) => {\n  const l = src[i].json, o = item.json.output || {};\n  const why = [];\n  let pts = 0;\n  if (o.pre_approved === 'yes') { pts += 15; why.push('pre-approved / funds ready'); }\n  const tmRaw = o.timeline_months === null || o.timeline_months === '' || o.timeline_months === undefined ? null : Number(o.timeline_months);\n  const tm = Number.isFinite(tmRaw) && !/^unknown$/i.test(String(o.timeline || '').trim()) ? tmRaw : null;  // ignore a number the model filled in for an unknown timeline\n  if (tm !== null && tm <= 3) { pts += 10; why.push('moving within 3 months'); } else if (tm !== null && tm > 12) pts -= 10;\n  if (o.intent === 'sell_valuation' || l.enquiry_type === 'valuation') { pts += 10; why.push('valuation request'); }\n  if (l.phone) { pts += 5; why.push('left a phone number'); }\n  const bmax = Number(o.budget_max) || 0, price = Number(l.property_price) || 0;\n  if (bmax && price && bmax >= 0.9 * price) { pts += 5; why.push('budget fits the price'); }\n  if (bmax && price && bmax < 0.75 * price) { pts -= 15; why.push('budget well below the price'); }\n  if (l.is_repeat) { pts += 5; why.push('repeat enquiry'); }\n  const score = Math.max(0, Math.min(100, Math.round(0.6 * (Number(o.ai_score) || 0) + pts)));\n  const temperature = score >= hot ? 'hot' : score >= 40 ? 'warm' : 'cold';\n  const canReply = !!l.email && !l.is_repeat;\n  const reply_status = !l.email ? 'no e-mail: call them' : l.is_repeat ? 'repeat enquiry: agent to reply' : mode === 'send' ? 'sent' : 'draft in Gmail';\n  const row = {\n    lead_id: l.lead_id, created_at: l.created_at || l.received_at, updated_at: $now.toFormat('yyyy-MM-dd HH:mm'), source: l.source,\n    name: l.name, email: l.email, phone: l.phone, enquiry_type: l.enquiry_type, intent: o.intent || '',\n    property: l.property_matched || l.property_address || l.property_ref || '', budget: o.budget || l.budget_given || '',\n    timeline: o.timeline || l.timeline_given || '', pre_approved: o.pre_approved || 'unknown', position: o.position || 'unknown',\n    score, temperature, score_reasons: why.join('; '), summary: o.summary || '', missing_info: (o.missing_info || []).join('; '),\n    stage: l.is_repeat ? (l.previous_stage || 'contacted') : canReply ? 'contacted' : 'call needed', status: 'active',\n    reply_status, followups_sent: Number(l.followups_sent) || 0,\n    next_followup: canReply && days.length ? $today.plus({ days: days[0] }).toFormat('yyyy-MM-dd') : '',\n    last_contact: new Date().toISOString(), enquiries: (Number(l.previous_enquiries) || 0) + 1, message: l.message,\n    reply_subject: o.reply_subject || 'Your enquiry', reply_body: o.reply_body || '',\n  };\n  const icon = temperature === 'hot' ? '🔥' : '🏠';\n  const alert_html = `${icon} <b>${esc(temperature.toUpperCase())} lead (${score}/100)</b>: ${esc(l.name || 'unknown')}\\n`\n    + `${esc(row.intent)} · ${esc(row.property || 'no property given')}\\nBudget: ${esc(row.budget || '?')} · Timeline: ${esc(row.timeline || '?')} · Pre-approved: ${esc(row.pre_approved)}\\n`\n    + `📞 ${esc(l.phone || '-')} · ✉️ ${esc(l.email || '-')}\\n${esc(row.summary)}\\nWhy: ${esc(row.score_reasons || '-')}\\nReply: ${esc(reply_status)}`;\n  return { json: { ...row, can_reply: canReply, reply_mode: mode, alert_html } };\n});"
+      },
+      "id": "1e30ce6f-a637-5689-a7b9-6e81f502b6bf",
+      "name": "Score the lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Qualify and draft the reply with AI",
+        "height": 500,
+        "width": 540,
+        "color": 7
+      },
+      "id": "a2b1837b-dab9-560d-b98f-f344a27e1656",
+      "name": "Section: Qualify and draft the reply with AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        620,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Set responder settings').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "2eff2066-5889-58f9-b692-de5d8937135b",
+      "name": "Add lead to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1300,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b90a0d1e-8c71-55f7-b03f-a5ea11b4c2c6",
+              "leftValue": "={{ $('Score the lead').item.json.can_reply }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "c1daf0c8-df3c-57d1-a3f2-1d65fa95fbff",
+      "name": "Has an e-mail address?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1540,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ $('Score the lead').item.json.reply_subject }}",
+        "emailType": "text",
+        "message": "={{ $('Score the lead').item.json.reply_body }}",
+        "options": {
+          "sendTo": "={{ $('Score the lead').item.json.email }}"
+        }
+      },
+      "id": "c9ad4dde-d57f-5bb2-ae90-5a112ad96899",
+      "name": "Create reply draft in Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1780,
+        -140
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "912ef891-c70f-5126-9e75-36a94b3ea094",
+              "leftValue": "={{ $('Score the lead').item.json.temperature }}",
+              "rightValue": "hot",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d27b1f90-b7e2-5a1e-92d3-5ba438d9e52a",
+      "name": "Hot lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1540,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Set responder settings').first().json.notify_email }}",
+        "subject": "=🔥 Hot lead: {{ $('Score the lead').item.json.name }} ({{ $('Score the lead').item.json.score }}/100)",
+        "emailType": "text",
+        "message": "={{ $('Score the lead').item.json.alert_html.replace(/<[^>]+>/g, '') }}\n\nMessage:\n{{ $('Score the lead').item.json.message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "0aff5562-f6f4-59f5-8a6a-099d31f0588b",
+      "name": "Email me the hot lead",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1780,
+        160
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 3. Log the lead, draft the reply, alert on hot leads",
+        "height": 600,
+        "width": 700,
+        "color": 7
+      },
+      "id": "84bbc69b-50dd-5d92-b97f-44c150df60dd",
+      "name": "Section: Log the lead, draft the reply, alert on hot leads",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1240,
+        -260
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "22963c18-5885-5587-8fc0-f481cf5516d5",
+      "name": "When the workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=Workflow failed: {{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Workflow: {{ $json.workflow.name }}\nNode: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email the error",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      },
+      "id": "6125a599-a6a9-5841-90f2-c98e22d6a016",
+      "position": [
+        140,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Alert on errors\nRuns as its own execution when any node fails. Put your e-mail address in the alert node, then in **Workflow settings > Error workflow** pick this workflow.",
+        "height": 300,
+        "width": 540,
+        "color": 7
+      },
+      "id": "55ed9277-1fa6-53d7-8025-56a755a099d7",
+      "name": "Section: Alert on errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "New portal or enquiry e-mail": {
+      "main": [
+        [
+          {
+            "node": "Read the portal e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the portal e-mail": {
+      "main": [
+        [
+          {
+            "node": "Set responder settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Website enquiry form": {
+      "main": [
+        [
+          {
+            "node": "Read the web form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the web form": {
+      "main": [
+        [
+          {
+            "node": "Set responder settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 3.5 Flash-Lite": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Qualify and draft the reply",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead qualification format": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Qualify and draft the reply",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set responder settings": {
+      "main": [
+        [
+          {
+            "node": "Qualify and draft the reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualify and draft the reply": {
+      "main": [
+        [
+          {
+            "node": "Score the lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score the lead": {
+      "main": [
+        [
+          {
+            "node": "Add lead to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add lead to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Has an e-mail address?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Hot lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has an e-mail address?": {
+      "main": [
+        [
+          {
+            "node": "Create reply draft in Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot lead?": {
+      "main": [
+        [
+          {
+            "node": "Email me the hot lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When the workflow fails": {
+      "main": [
+        [
+          {
+            "node": "Email the error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
